@@ -36,12 +36,16 @@ System Settings → General → Sharing → **Remote Login: on**.
 
 **3. [From your client] Authorize your key and sanity-check.**
 
+If your **client username** (the name in your MacBook prompt, `echo $USER`) differs from your **mini account name** (e.g. `gene` on the laptop but `genehan` on the mini), you **must** pass the mini user explicitly to `ssh-copy-id`. Otherwise your key gets authorized for the wrong remote account and `claudehome` will fail later with `Permission denied` under BatchMode even though `ssh gene-mini` appears to work (because it silently falls back to password auth).
+
 ```sh
-ssh-copy-id gene-mini
-ssh gene-mini echo ok        # expect: ok
+ssh-copy-id genehan@gene-mini                        # replace genehan with your mini user
+ssh -o BatchMode=yes genehan@gene-mini echo ok       # expect: ok, no password prompt
 ```
 
-Once `ssh gene-mini echo ok` prints `ok`, every remaining step works over SSH — you do not need to walk back to the mini.
+If usernames match, `ssh-copy-id gene-mini` is enough.
+
+Once BatchMode SSH returns `ok`, every remaining step works over SSH — you do not need to walk back to the mini.
 
 **4. Install tmux.**
 
@@ -84,7 +88,16 @@ ssh gene-mini 'which claude tmux'     # both paths should print
 ssh gene-mini 'mkdir -p ~/projects/claudecode'
 ```
 
-That's it — no `git clone`, no `install.sh`, no `claudehome` binary on the Mac mini. The mini only needs `tmux` + `claude` + SSH. The `claudehome` CLI lives on the client side.
+**8. Log Claude Code in on the mini (first time only).**
+A fresh `claude` install has no Anthropic credentials. The OAuth login needs a real TTY, which requires `ssh -t`:
+
+```sh
+ssh -t genehan@gene-mini claude     # replace genehan with your mini user
+```
+
+Claude prints a login URL on first launch. Paste it into a browser on any device, complete the Anthropic sign-in, and paste the returned code back into the SSH session. Credentials save to `~/.claude/` on the mini and persist across reboots — you only do this once per mini. After that, sessions launched by `claudehome` use the stored login automatically.
+
+That's it — no `git clone`, no `install.sh`, no `claudehome` binary on the Mac mini. The mini only needs `tmux` + logged-in `claude` + SSH. The `claudehome` CLI lives on the client side.
 
 ### Mac client — MacBook (or any Mac you connect from)
 
@@ -113,6 +126,15 @@ source ~/.zshrc
 ```
 
 Use `~/.bashrc` instead of `~/.zshrc` if you run bash. Verify with `which claudehome` — it should print `~/.local/bin/claudehome`.
+
+**If your client's `$USER` doesn't match your mini account**, tell `claudehome` the correct remote user. Otherwise it defaults to the client's `$USER` and SSH rejects the auth (you'll see `cannot reach $USER@gene-mini over SSH` even after the mini is fully set up):
+
+```sh
+echo 'export CLAUDEHOME_USER=genehan' >> ~/.zshrc   # replace genehan with your mini user
+source ~/.zshrc
+```
+
+Same applies to the Tailscale hostname if your mini isn't called `gene-mini` — set `CLAUDEHOME_HOST=<your-tailscale-name>` the same way.
 
 ### PC — Windows (not yet)
 
