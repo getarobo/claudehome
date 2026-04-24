@@ -39,13 +39,13 @@ brew install tmux
 
 # 4. Make sure `claude` is on PATH for non-interactive SSH.
 #    SSH does not source ~/.zshrc — put PATH exports in ~/.zshenv on the mini.
-ssh macmini 'which claude tmux'   # should print both paths (run this from your client after step 5)
+ssh genemini 'which claude tmux'   # should print both paths (run this from your client after step 5)
 
 # 5. Authorize your client's SSH key (run this from the client)
-ssh-copy-id macmini
+ssh-copy-id genemini
 
 # 6. Create the projects root
-ssh macmini 'mkdir -p ~/projects/claudecode'
+ssh genemini 'mkdir -p ~/projects/claudecode'
 ```
 
 No `git clone`, no install script, no `claudehome` binary on the Mac mini. The mini just runs tmux + claude when a client attaches.
@@ -76,7 +76,7 @@ If `~/.local/bin` isn't in your `PATH`, `install.sh` prints the one-line export 
 The PowerShell client is a deferred v2. Meanwhile you can SSH in manually from Windows' built-in OpenSSH:
 
 ```powershell
-ssh macmini
+ssh genemini
 tmux new-session -A -s claudehome-my-project -c ~/projects/claudecode/my-project 'claude; exec $SHELL'
 ```
 
@@ -108,7 +108,7 @@ All configuration is via environment variables. There is no config file in v1.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `CLAUDEHOME_HOST` | `macmini` | Tailscale hostname of the Mac mini |
+| `CLAUDEHOME_HOST` | `genemini` | Tailscale hostname of the Mac mini |
 | `CLAUDEHOME_USER` | `$USER` on the client | SSH user on the Mac mini |
 | `CLAUDEHOME_PROJECTS_DIR` | `~/projects/claudecode` | Projects root **on the Mac mini** |
 
@@ -138,13 +138,13 @@ Project directory names with spaces, quotes, or other shell-special characters a
 
 ## Troubleshooting
 
-- **`cannot reach macmini via SSH`**
-  Check `tailscale status` on both devices — both should show the other as connected. Make sure Mac mini's Remote Login is on. Test with a plain `ssh macmini echo ok`.
+- **`cannot reach genemini via SSH`**
+  Check `tailscale status` on both devices — both should show the other as connected. Make sure Mac mini's Remote Login is on. Test with a plain `ssh genemini echo ok`.
 
 - **`no projects found in ~/projects/claudecode`**
   Create the directory and a first project on the Mac mini:
   ```sh
-  ssh macmini 'mkdir -p ~/projects/claudecode/my-first-project'
+  ssh genemini 'mkdir -p ~/projects/claudecode/my-first-project'
   ```
 
 - **Picker falls back to numbered menu instead of arrow keys**
@@ -158,7 +158,7 @@ Project directory names with spaces, quotes, or other shell-special characters a
 
 - **Cleaning up orphaned sessions.** If you delete a project directory from `~/projects/claudecode`, its tmux session lingers. Remove it with:
   ```
-  ssh macmini 'tmux kill-session -t claudehome-<project-name>'
+  ssh genemini 'tmux kill-session -t claudehome-<project-name>'
   ```
 
 ## Non-goals (v1)
