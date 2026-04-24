@@ -105,7 +105,14 @@ cd ~/projects/claudehome
 # or: ./install.sh --system  # symlinks into /usr/local/bin (requires sudo)
 ```
 
-If `~/.local/bin` isn't in your `PATH`, `install.sh` prints the one-line export to add to your shell rc.
+If `install.sh` warns that `~/.local/bin` is not in your `PATH`, add it to your shell rc and re-source:
+
+```sh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+Use `~/.bashrc` instead of `~/.zshrc` if you run bash. Verify with `which claudehome` — it should print `~/.local/bin/claudehome`.
 
 ### PC — Windows (not yet)
 
