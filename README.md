@@ -26,29 +26,65 @@ There are **two roles**: the **server** (Mac mini, always on) and the **client**
 
 ### Mac mini — server (do this **once**)
 
+Steps 1–2 need physical access to the mini (GUI). Everything after that can run **either** on the mini in Terminal **or** remotely via `ssh genemini '…'` from any client — both produce the same result. The commands below show the remote form; drop the `ssh genemini '…'` wrapper if you're sitting at the mini.
+
+**1. [At the mini, GUI] Install Tailscale and log in.**
+Download from https://tailscale.com/download, open the app, log in to the same account your clients use. Confirm the mini appears in [the Tailscale admin console](https://login.tailscale.com/admin/machines). Enable **MagicDNS** under the DNS tab so `ssh genemini` resolves without typing the full `.ts.net` suffix. If the mini's Tailscale name isn't `genemini`, rename it on the admin page (or set `CLAUDEHOME_HOST=<actual-name>` on your clients later).
+
+**2. [At the mini, GUI] Enable SSH.**
+System Settings → General → Sharing → **Remote Login: on**.
+
+**3. [From your client] Authorize your key and sanity-check.**
+
 ```sh
-# 1. Tailscale — download, install, log in
-#    https://tailscale.com/download
-#    Confirm the mini shows up on your tailnet (e.g. `tailscale status`).
-
-# 2. Enable SSH
-#    System Settings → General → Sharing → Remote Login: ON
-
-# 3. Install tmux
-brew install tmux
-
-# 4. Make sure `claude` is on PATH for non-interactive SSH.
-#    SSH does not source ~/.zshrc — put PATH exports in ~/.zshenv on the mini.
-ssh genemini 'which claude tmux'   # should print both paths (run this from your client after step 5)
-
-# 5. Authorize your client's SSH key (run this from the client)
 ssh-copy-id genemini
+ssh genemini echo ok        # expect: ok
+```
 
-# 6. Create the projects root
+Once `ssh genemini echo ok` prints `ok`, every remaining step works over SSH — you do not need to walk back to the mini.
+
+**4. Install tmux.**
+
+```sh
+ssh genemini 'brew install tmux'
+```
+
+**5. Install Claude Code on the mini** (skip if `claude` is already there).
+
+```sh
+ssh genemini 'curl -fsSL https://claude.ai/install.sh | bash'
+```
+
+**6. Put Homebrew and `claude` on the SSH (non-interactive) PATH.**
+macOS SSH sessions load `~/.zshenv` but **not** `~/.zshrc`, so Homebrew and `~/.local/bin` typically aren't visible over SSH by default. Without this step, `ssh genemini 'claude'` returns `command not found` even though claude works fine when you open Terminal on the mini.
+
+Apple Silicon:
+
+```sh
+echo 'export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"' \
+  | ssh genemini 'cat >> ~/.zshenv'
+```
+
+Intel Macs:
+
+```sh
+echo 'export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"' \
+  | ssh genemini 'cat >> ~/.zshenv'
+```
+
+Verify both tools now resolve over SSH:
+
+```sh
+ssh genemini 'which claude tmux'     # both paths should print
+```
+
+**7. Create the projects root.**
+
+```sh
 ssh genemini 'mkdir -p ~/projects/claudecode'
 ```
 
-No `git clone`, no install script, no `claudehome` binary on the Mac mini. The mini just runs tmux + claude when a client attaches.
+That's it — no `git clone`, no `install.sh`, no `claudehome` binary on the Mac mini. The mini only needs `tmux` + `claude` + SSH. The `claudehome` CLI lives on the client side.
 
 ### Mac client — MacBook (or any Mac you connect from)
 
