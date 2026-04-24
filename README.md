@@ -136,16 +136,90 @@ source ~/.zshrc
 
 Same applies to the Tailscale hostname if your mini isn't called `gene-mini` — set `CLAUDEHOME_HOST=<your-tailscale-name>` the same way.
 
-### PC — Windows (not yet)
+### PC — Windows (PowerShell 7+)
 
-The PowerShell client is a deferred v2. Meanwhile you can SSH in manually from Windows' built-in OpenSSH:
+Do this **once per Windows client**.
+
+**Prerequisites** (install once if not already present):
 
 ```powershell
-ssh gene-mini
-tmux new-session -A -s claudehome-my-project -c ~/projects/claudecode/my-project 'claude; exec $SHELL'
+# PowerShell 7 (if not already installed)
+winget install Microsoft.PowerShell
+
+# Tailscale — same tailnet as the mini
+winget install Tailscale.Tailscale
+
+# Windows OpenSSH client — pre-installed on Windows 10 1803+; verify:
+where.exe ssh     # should print C:\Windows\System32\OpenSSH\ssh.exe
+
+# fzf — optional but recommended for the arrow-key picker
+winget install junegunn.fzf
+# or: scoop install fzf
 ```
 
-When `claudehome.ps1` ships, the above collapses to a single `claudehome` command.
+**SSH key — generate and authorize (do once per PC):**
+
+Check if you already have a key:
+
+```powershell
+Test-Path "$HOME\.ssh\id_ed25519.pub"   # true = already have one, skip keygen
+```
+
+If not, generate one:
+
+```powershell
+ssh-keygen -t ed25519 -C "your-pc"    # accept the default path; passphrase is optional
+```
+
+Copy the key to the Mac mini. If `ssh-copy-id` works from your PC (available with OpenSSH 8.1+):
+
+```powershell
+ssh-copy-id genehan@gene-mini          # replace genehan with your mini account name
+```
+
+If `ssh-copy-id` isn't available (older OpenSSH), do it manually:
+
+```powershell
+# Read your public key and append it to the mini's authorized_keys in one command
+$pub = Get-Content "$HOME\.ssh\id_ed25519.pub"
+ssh genehan@gene-mini "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '$pub' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+```
+
+Verify passwordless SSH works before installing claudehome:
+
+```powershell
+ssh -o BatchMode=yes genehan@gene-mini echo ok    # expect: ok   (no password prompt)
+```
+
+> **Username mismatch?** If your Windows username (the name in your pwsh prompt, `$env:USERNAME`) differs from your mini account (e.g. `artist` on the PC but `genehan` on the mini), you **must** pass the mini user explicitly to `ssh-copy-id` (as shown above). If you skip this and use just `ssh-copy-id gene-mini`, the key gets authorized for the wrong account and `claudehome` will fail with `cannot reach … over SSH` even after setup looks correct.
+
+**Install the CLI:**
+
+```powershell
+git clone git@github.com:sr-gene/claudehome.git $HOME\projects\claudehome
+Set-Location $HOME\projects\claudehome
+.\install.ps1
+```
+
+Open a **new** pwsh (or cmd.exe) window, then run `claudehome`.
+
+**If your Windows username differs from your mini account**, tell claudehome the correct remote user (permanent, survives reboots):
+
+```powershell
+[Environment]::SetEnvironmentVariable('CLAUDEHOME_USER', 'genehan', 'User')
+```
+
+Same for `CLAUDEHOME_HOST` if your mini's Tailscale name isn't `gene-mini`:
+
+```powershell
+[Environment]::SetEnvironmentVariable('CLAUDEHOME_HOST', 'my-mini', 'User')
+```
+
+Open a new shell after setting env vars — `[Environment]::SetEnvironmentVariable` with `'User'` scope takes effect in new sessions only.
+
+**ExecutionPolicy / MOTW note.** `git clone` does not apply Mark-of-the-Web, so `RemoteSigned` policy permits the cloned scripts. If you downloaded the repo as a ZIP instead, run `Unblock-File .\install.ps1` before executing.
+
+**Terminal tip.** Use WezTerm, Windows Terminal, or Alacritty for the best rendering. The `.cmd` shim also works from a plain `cmd.exe` prompt — useful for confirming the install works, but a modern terminal is recommended for daily use.
 
 ### iPhone (not yet)
 

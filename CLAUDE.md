@@ -8,46 +8,49 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture (one paragraph)
 
-The client runs `bin/claudehome` (bash). It makes **one** SSH round-trip to the Mac mini over Tailscale, asking the remote to list projects under `CLAUDEHOME_PROJECTS_DIR` and any live tmux sessions. The remote command is wrapped in `bash --norc --noprofile -c '…'` so shell-profile noise (conda, nvm, pyenv, Tailscale banners) cannot contaminate the sentinel-delimited output. The client parses projects + session state, shows a picker (`fzf` preferred, bash `select` fallback), then runs `ssh -t … tmux new-session -A -s claudehome-<project> -c <dir> "claude; exec $SHELL"`. `tmux new-session -A` is idempotent: attach if the session exists, create if not. The `; exec $SHELL` tail keeps the tmux session alive after `claude` exits, so you drop to a shell and can relaunch in place. There is no daemon, no config file, and no state on the Mac mini beyond the tmux sessions themselves.
+Each client (`bin/claudehome` on Mac, `bin/claudehome.ps1` on Windows) makes **one** SSH round-trip to the Mac mini over Tailscale, asking the remote to list projects under `CLAUDEHOME_PROJECTS_DIR` and any live tmux sessions. The remote command is wrapped in `bash --norc --noprofile -c '…'` so shell-profile noise (conda, nvm, pyenv, Tailscale banners) cannot contaminate the sentinel-delimited output. The client parses projects + session state, shows a picker (`fzf` preferred, `bash select` / `Read-Host` fallback), then runs `ssh -t … tmux new-session -A -D -s claudehome-<project> -c <dir> "claude; exec $SHELL"`. `tmux new-session -A` is idempotent: attach if the session exists, create if not. The `-D` flag detaches any other clients currently attached to the same session. The `; exec $SHELL` tail keeps the tmux session alive after `claude` exits. There is no daemon, no config file, and no state on the Mac mini beyond the tmux sessions themselves.
 
 ## Development
 
-- **Main script:** `bin/claudehome` (bash, ~80 lines).
-- **Installer:** `install.sh` — symlinks to `~/.local/bin/claudehome` (or `/usr/local/bin` with `--system`).
-- **Lint:** `shellcheck bin/claudehome install.sh`.
-- **Smoke test:** `bin/claudehome --help` must exit 0 and print usage.
-- **Full integration** (resuming sessions, multi-project concurrency, etc.) requires a real Tailscale-reachable Mac mini with `tmux` and `claude` installed. The requires-mac-mini acceptance criteria are AC1–AC8 and AC11 in `.omc/specs/deep-interview-claudehome-v1.md`.
+- **Main script (Mac):** `bin/claudehome` (bash, ~150 lines).
+- **Main script (Windows):** `bin/claudehome.ps1` (pwsh 7+, ~150 lines) + `bin/claudehome.cmd` shim.
+- **Installer (Mac):** `install.sh` — symlinks to `~/.local/bin/claudehome` (or `/usr/local/bin` with `--system`).
+- **Installer (Windows):** `install.ps1` — adds `<repo>\bin` to user PATH, verifies shim.
+- **Lint (Mac):** `shellcheck bin/claudehome install.sh`.
+- **Lint (Windows):** `Invoke-ScriptAnalyzer bin/claudehome.ps1, install.ps1`.
+- **Smoke test:** `bin/claudehome --help` / `bin/claudehome.ps1 --help` must exit 0 and print usage.
+- **Full integration** requires a real Tailscale-reachable Mac mini with `tmux` and `claude` installed. The requires-mac-mini acceptance criteria are AC1–AC8 and AC11 in `.omc/specs/deep-interview-claudehome-v1.md`; PC-specific criteria AC-PC1–AC-PC8 are in `.omc/specs/deep-interview-claudehome-pc-v1.md`.
 
 ## Scope guardrails
 
-v1 is Mac client only. The following are explicit non-goals — **do not add them** without updating the spec first:
+The following are explicit non-goals — **do not add them** without updating the relevant spec first:
 
 - Subcommands beyond `--help` (`ls`, `kill`, `attach <name>`, `new`)
 - Config files (YAML/TOML/`.claudehomerc`); env vars only
 - Daemons, background workers, persistent state files, or anything outside plain tmux
-- Windows / iPhone / web clients
-- Packaging (npm, Homebrew formula, Docker, systemd)
+- iPhone / web clients
+- Packaging (npm, Homebrew formula, Docker, systemd, PowerShell Gallery, winget manifest)
+- `install.ps1 --system` / machine-wide install on Windows
+- PowerShell 5.1 support (pwsh 7+ only for the Windows client)
 
-Windows PowerShell and iPhone clients are planned but deliberately out of scope for this pass.
+iPhone client is planned but out of scope for this pass.
 
 ## Key docs
 
 - `.omc/specs/deep-interview-claudehome-v1.md` — v1 Mac client spec, 12 acceptance criteria
 - `.omc/plans/claudehome-v1-plan.md` — v1 Mac implementation plan with ADR, Architect + Critic consensus addendum
-- `.omc/specs/deep-interview-claudehome-pc-v1.md` — v1 PC (PowerShell 7+) client spec, strict-parity port, 14.8% ambiguity, **pending ralplan + autopilot execution on a Windows machine**
+- `.omc/specs/deep-interview-claudehome-pc-v1.md` — v1 PC (PowerShell 7+) client spec, 8 PC-specific ACs
+- `.omc/plans/claudehome-pc-v1-plan.md` — v1 PC implementation plan, Architect + Critic consensus APPROVED
 
-## Resuming on a Windows PC
+## Windows PC — post-install verification
 
-The PC (pwsh 7) port was scoped on macOS and left unbuilt so it can be executed natively on the target machine. When resuming on Windows:
+After running `.\install.ps1`, open a **new** pwsh window and run the following checklist (AC-PC1–AC-PC8 from the spec):
 
-1. `git pull` this repo to a working dir on the PC.
-2. Open Claude Code in the repo root.
-3. Invoke the 3-stage pipeline against the PC spec:
-   ```
-   /oh-my-claudecode:ralplan --consensus --direct --spec .omc/specs/deep-interview-claudehome-pc-v1.md
-   ```
-   When consensus is reached, the pipeline chains to autopilot automatically. Autopilot writes `bin/claudehome.ps1`, `bin/claudehome.cmd`, and `install.ps1`, updates README and CLAUDE.md, and runs static QA + validation review.
-
-4. **Scope is locked by the spec** — strict parity with the bash client. Do not add subcommands, drop PS 5.1 compat, skip allowlist validation, or deviate from the bash `bin/claudehome` behavior without updating the spec first. All 12 parent-spec ACs plus 8 PC-specific ACs must pass.
-
-5. After autopilot, run AC-PC1 through AC-PC8 from the spec as a manual verification checklist against your Windows environment.
+- **AC-PC1** — `claudehome` by bare name opens the picker and attaches successfully.
+- **AC-PC2** — `claudehome --help` and `claudehome -h` print the usage text with the env var table.
+- **AC-PC3** — `$env:CLAUDEHOME_HOST = 'alt-host'; claudehome` targets `alt-host` in the error message.
+- **AC-PC4** — `$env:CLAUDEHOME_HOST = 'evil;rm'; claudehome` exits 1 with "unsupported characters".
+- **AC-PC5** — With fzf on PATH: arrow-key picker. Without fzf: numbered `Read-Host` menu. Both show `[active …]`/`[idle]` annotations.
+- **AC-PC6** — Attach from MacBook to a project, then pick the same project from the PC — MacBook detaches cleanly.
+- **AC-PC7** — Attached `claude` renders correctly in WezTerm (ANSI colors, spinner, status line).
+- **AC-PC8** — From `cmd.exe`, typing `claudehome` launches the tool via the `.cmd` shim.
