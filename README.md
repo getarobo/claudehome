@@ -63,7 +63,7 @@ brew install --cask tailscale
 brew install fzf
 
 # 3. Clone this repo and install the CLI
-git clone git@github.com:sr-gene/claudecode.git ~/projects/claudehome
+git clone git@github.com:sr-gene/claudehome.git ~/projects/claudehome
 cd ~/projects/claudehome
 ./install.sh                 # symlinks bin/claudehome into ~/.local/bin
 # or: ./install.sh --system  # symlinks into /usr/local/bin (requires sudo)
