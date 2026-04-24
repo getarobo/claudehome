@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# claudehome — connect to a persistent Claude Code session on your Mac mini.
+# See README.md for architecture and acceptance criteria.
+
+set -euo pipefail
+
+# ---- help ----
+if [[ "${1:-}" =~ ^(-h|--help)$ ]]; then
+  cat <<'USAGE'
+Usage: claudehome
+
+  Lists project directories under CLAUDEHOME_PROJECTS_DIR on the Mac mini,
+  shows tmux session state for each, and attaches via SSH over Tailscale.
+  Sessions are named claudehome-<project> and outlive any claude process.
+
+Environment variables:
+  CLAUDEHOME_HOST          Tailscale hostname of the Mac mini   (default: macmini)
+  CLAUDEHOME_USER          SSH user on the Mac mini             (default: $USER)
+  CLAUDEHOME_PROJECTS_DIR  Projects root on the Mac mini        (default: ~/projects/claudecode)
+
+Detach from an attached session with tmux's standard binding: Ctrl-b d.
+The tmux session keeps running on the Mac mini after you disconnect.
+
+Note: CLAUDEHOME_PROJECTS_DIR is a path on the Mac mini. If you use a
+leading ~, set it with single quotes so your client shell does not
+expand the tilde locally: export CLAUDEHOME_PROJECTS_DIR='~/other/root'
+USAGE
+  exit 0
+fi
+
+# ---- config ----
+HOST="${CLAUDEHOME_HOST:-macmini}"
+REMOTE_USER="${CLAUDEHOME_USER:-$USER}"
+PROJECTS_DIR="${CLAUDEHOME_PROJECTS_DIR:-~/projects/claudecode}"
+
+# ---- validate config ----
+# These values are interpolated into a remote `bash -c '...'` command. Strict
+# allowlists close the shell-injection vector (a single quote in any of these
+# would break out of the remote bash -c context).
+if [[ ! "$HOST" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+  echo "claudehome: CLAUDEHOME_HOST='${HOST}' has unsupported characters." >&2
+  echo "  Allowed: letters, digits, '.', '_', '-'" >&2
+  exit 1
+fi
+if [[ ! "$REMOTE_USER" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+  echo "claudehome: CLAUDEHOME_USER='${REMOTE_USER}' has unsupported characters." >&2
+  echo "  Allowed: letters, digits, '.', '_', '-'" >&2
+  exit 1
+fi
+if [[ ! "$PROJECTS_DIR" =~ ^[a-zA-Z0-9._~/-]+$ ]]; then
+  echo "claudehome: CLAUDEHOME_PROJECTS_DIR='${PROJECTS_DIR}' has unsupported characters." >&2
+  echo "  Allowed: letters, digits, '.', '_', '/', '~', '-'" >&2
+  exit 1
+fi
+
+# ---- fetch picker data (single SSH round-trip) ----
+# Run the remote command with `bash --norc --noprofile -c` so profile noise
+# (conda init, nvm, pyenv, Tailscale banners, MOTD) cannot pollute our
+# sentinel-delimited output. Client-side variables expand inside the outer
+# double quotes; remote-side `~` expansion happens inside the clean bash.
+# shellcheck disable=SC2029
+if ! RAW=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "${REMOTE_USER}@${HOST}" "bash --norc --noprofile -c '
+  ls -1 ${PROJECTS_DIR} 2>/dev/null || true
+  echo ---TMUX---
+  tmux list-sessions -F \"#{session_name} #{session_activity}\" 2>/dev/null || true
+'" 2>/dev/null); then
+  echo "claudehome: cannot reach ${REMOTE_USER}@${HOST} over SSH." >&2
+  echo "  - Check Tailscale is up on both devices:   tailscale status" >&2
+  echo "  - Check Mac mini Remote Login is enabled:  System Settings → General → Sharing" >&2
+  echo "  - Check your SSH key is authorized on the Mac mini." >&2
+  exit 1
+fi
+
+PROJECTS_BLOCK="${RAW%%---TMUX---*}"
+TMUX_BLOCK="${RAW#*---TMUX---}"
+
+# ---- build picker rows ----
+# We keep TMUX_BLOCK as a newline-separated string of "session_name ts" pairs and
+# look up each project with awk. No bash-4 associative array needed (macOS ships
+# bash 3.2 by default, so this stays portable without a Homebrew bash dependency).
+PICKER_LINES=()
+PICKER_NAMES=()
+NOW=$(date +%s)
+
+while IFS= read -r project; do
+  [[ -z "$project" ]] && continue
+  ts=$(awk -v s="claudehome-${project}" '$1==s { print $2; exit }' <<< "$TMUX_BLOCK")
+  if [[ -n "${ts:-}" ]]; then
+    age=$(( NOW - ts ))
+    (( age < 0 )) && age=0   # clamp client-vs-server clock skew
+    if   (( age < 60 ));    then label="${age}s ago"
+    elif (( age < 3600 ));  then label="$(( age / 60 ))m ago"
+    elif (( age < 86400 )); then label="$(( age / 3600 ))h ago"
+    else                         label="$(( age / 86400 ))d ago"
+    fi
+    PICKER_LINES+=("${project}  [active ${label}]")
+  else
+    PICKER_LINES+=("${project}  [idle]")
+  fi
+  PICKER_NAMES+=("$project")
+done <<< "$PROJECTS_BLOCK"
+
+if (( ${#PICKER_NAMES[@]} == 0 )); then
+  echo "claudehome: no projects found in ${PROJECTS_DIR} on ${HOST}." >&2
+  echo "  Create one with: ssh ${REMOTE_USER}@${HOST} 'mkdir -p ${PROJECTS_DIR}/my-project'" >&2
+  exit 1
+fi
+
+# ---- picker (fzf preferred, bash `select` fallback) ----
+SELECTED=
+if command -v fzf >/dev/null 2>&1; then
+  SELECTED=$(printf '%s\n' "${PICKER_LINES[@]}" | fzf --prompt='claudehome> ' --height=~50%) || exit 0
+else
+  PS3='Select a project: '
+  select SELECTED in "${PICKER_LINES[@]}"; do
+    [[ -n "${SELECTED:-}" ]] && break
+  done
+  # Ctrl-D / EOF out of `select` leaves SELECTED empty; exit cleanly.
+  [[ -z "${SELECTED:-}" ]] && exit 0
+fi
+
+# Extract project name (everything before the double-space annotation)
+PROJECT="${SELECTED%%  *}"
+
+# Revalidate the project name with the same allowlist applied to env vars —
+# a malicious or accidental directory name on the Mac mini should not be able
+# to break out of the remote bash -c quoting.
+if [[ ! "$PROJECT" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+  echo "claudehome: project directory '${PROJECT}' has characters that cannot be safely passed to SSH." >&2
+  echo "  Rename it on ${HOST} to use only letters, digits, '.', '_', '-'." >&2
+  exit 1
+fi
+
+# ---- attach (or create) tmux session, launch claude, keep shell on exit ----
+# Session is eternal; `claude; exec $SHELL` drops to a shell when claude
+# exits so you can relaunch in place without a new tmux session.
+# shellcheck disable=SC2029
+exec ssh -t "${REMOTE_USER}@${HOST}" "bash --norc --noprofile -c '
+  tmux new-session -A -s claudehome-${PROJECT} -c ${PROJECTS_DIR}/${PROJECT} \"claude; exec \$SHELL\"
+'"
