@@ -32,5 +32,22 @@ Windows PowerShell and iPhone clients are planned but deliberately out of scope 
 
 ## Key docs
 
-- `.omc/specs/deep-interview-claudehome-v1.md` — crystallized requirements, 12 acceptance criteria
-- `.omc/plans/claudehome-v1-plan.md` — implementation plan with ADR, Architect + Critic consensus addendum
+- `.omc/specs/deep-interview-claudehome-v1.md` — v1 Mac client spec, 12 acceptance criteria
+- `.omc/plans/claudehome-v1-plan.md` — v1 Mac implementation plan with ADR, Architect + Critic consensus addendum
+- `.omc/specs/deep-interview-claudehome-pc-v1.md` — v1 PC (PowerShell 7+) client spec, strict-parity port, 14.8% ambiguity, **pending ralplan + autopilot execution on a Windows machine**
+
+## Resuming on a Windows PC
+
+The PC (pwsh 7) port was scoped on macOS and left unbuilt so it can be executed natively on the target machine. When resuming on Windows:
+
+1. `git pull` this repo to a working dir on the PC.
+2. Open Claude Code in the repo root.
+3. Invoke the 3-stage pipeline against the PC spec:
+   ```
+   /oh-my-claudecode:ralplan --consensus --direct --spec .omc/specs/deep-interview-claudehome-pc-v1.md
+   ```
+   When consensus is reached, the pipeline chains to autopilot automatically. Autopilot writes `bin/claudehome.ps1`, `bin/claudehome.cmd`, and `install.ps1`, updates README and CLAUDE.md, and runs static QA + validation review.
+
+4. **Scope is locked by the spec** — strict parity with the bash client. Do not add subcommands, drop PS 5.1 compat, skip allowlist validation, or deviate from the bash `bin/claudehome` behavior without updating the spec first. All 12 parent-spec ACs plus 8 PC-specific ACs must pass.
+
+5. After autopilot, run AC-PC1 through AC-PC8 from the spec as a manual verification checklist against your Windows environment.
