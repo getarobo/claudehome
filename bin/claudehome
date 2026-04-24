@@ -14,7 +14,7 @@ Usage: claudehome
   Sessions are named claudehome-<project> and outlive any claude process.
 
 Environment variables:
-  CLAUDEHOME_HOST          Tailscale hostname of the Mac mini   (default: genemini)
+  CLAUDEHOME_HOST          Tailscale hostname of the Mac mini   (default: gene-mini)
   CLAUDEHOME_USER          SSH user on the Mac mini             (default: $USER)
   CLAUDEHOME_PROJECTS_DIR  Projects root on the Mac mini        (default: ~/projects/claudecode)
 
@@ -29,7 +29,7 @@ USAGE
 fi
 
 # ---- config ----
-HOST="${CLAUDEHOME_HOST:-genemini}"
+HOST="${CLAUDEHOME_HOST:-gene-mini}"
 REMOTE_USER="${CLAUDEHOME_USER:-$USER}"
 PROJECTS_DIR="${CLAUDEHOME_PROJECTS_DIR:-~/projects/claudecode}"
 

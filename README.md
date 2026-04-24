@@ -26,10 +26,10 @@ There are **two roles**: the **server** (Mac mini, always on) and the **client**
 
 ### Mac mini — server (do this **once**)
 
-Steps 1–2 need physical access to the mini (GUI). Everything after that can run **either** on the mini in Terminal **or** remotely via `ssh genemini '…'` from any client — both produce the same result. The commands below show the remote form; drop the `ssh genemini '…'` wrapper if you're sitting at the mini.
+Steps 1–2 need physical access to the mini (GUI). Everything after that can run **either** on the mini in Terminal **or** remotely via `ssh gene-mini '…'` from any client — both produce the same result. The commands below show the remote form; drop the `ssh gene-mini '…'` wrapper if you're sitting at the mini.
 
 **1. [At the mini, GUI] Install Tailscale and log in.**
-Download from https://tailscale.com/download, open the app, log in to the same account your clients use. Confirm the mini appears in [the Tailscale admin console](https://login.tailscale.com/admin/machines). Enable **MagicDNS** under the DNS tab so `ssh genemini` resolves without typing the full `.ts.net` suffix. If the mini's Tailscale name isn't `genemini`, rename it on the admin page (or set `CLAUDEHOME_HOST=<actual-name>` on your clients later).
+Download from https://tailscale.com/download, open the app, log in to the same account your clients use. Confirm the mini appears in [the Tailscale admin console](https://login.tailscale.com/admin/machines). Enable **MagicDNS** under the DNS tab so `ssh gene-mini` resolves without typing the full `.ts.net` suffix. If the mini's Tailscale name isn't `gene-mini`, rename it on the admin page (or set `CLAUDEHOME_HOST=<actual-name>` on your clients later).
 
 **2. [At the mini, GUI] Enable SSH.**
 System Settings → General → Sharing → **Remote Login: on**.
@@ -37,51 +37,51 @@ System Settings → General → Sharing → **Remote Login: on**.
 **3. [From your client] Authorize your key and sanity-check.**
 
 ```sh
-ssh-copy-id genemini
-ssh genemini echo ok        # expect: ok
+ssh-copy-id gene-mini
+ssh gene-mini echo ok        # expect: ok
 ```
 
-Once `ssh genemini echo ok` prints `ok`, every remaining step works over SSH — you do not need to walk back to the mini.
+Once `ssh gene-mini echo ok` prints `ok`, every remaining step works over SSH — you do not need to walk back to the mini.
 
 **4. Install tmux.**
 
 ```sh
-ssh genemini 'brew install tmux'
+ssh gene-mini 'brew install tmux'
 ```
 
 **5. Install Claude Code on the mini** (skip if `claude` is already there).
 
 ```sh
-ssh genemini 'curl -fsSL https://claude.ai/install.sh | bash'
+ssh gene-mini 'curl -fsSL https://claude.ai/install.sh | bash'
 ```
 
 **6. Put Homebrew and `claude` on the SSH (non-interactive) PATH.**
-macOS SSH sessions load `~/.zshenv` but **not** `~/.zshrc`, so Homebrew and `~/.local/bin` typically aren't visible over SSH by default. Without this step, `ssh genemini 'claude'` returns `command not found` even though claude works fine when you open Terminal on the mini.
+macOS SSH sessions load `~/.zshenv` but **not** `~/.zshrc`, so Homebrew and `~/.local/bin` typically aren't visible over SSH by default. Without this step, `ssh gene-mini 'claude'` returns `command not found` even though claude works fine when you open Terminal on the mini.
 
 Apple Silicon:
 
 ```sh
 echo 'export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"' \
-  | ssh genemini 'cat >> ~/.zshenv'
+  | ssh gene-mini 'cat >> ~/.zshenv'
 ```
 
 Intel Macs:
 
 ```sh
 echo 'export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"' \
-  | ssh genemini 'cat >> ~/.zshenv'
+  | ssh gene-mini 'cat >> ~/.zshenv'
 ```
 
 Verify both tools now resolve over SSH:
 
 ```sh
-ssh genemini 'which claude tmux'     # both paths should print
+ssh gene-mini 'which claude tmux'     # both paths should print
 ```
 
 **7. Create the projects root.**
 
 ```sh
-ssh genemini 'mkdir -p ~/projects/claudecode'
+ssh gene-mini 'mkdir -p ~/projects/claudecode'
 ```
 
 That's it — no `git clone`, no `install.sh`, no `claudehome` binary on the Mac mini. The mini only needs `tmux` + `claude` + SSH. The `claudehome` CLI lives on the client side.
@@ -112,7 +112,7 @@ If `~/.local/bin` isn't in your `PATH`, `install.sh` prints the one-line export 
 The PowerShell client is a deferred v2. Meanwhile you can SSH in manually from Windows' built-in OpenSSH:
 
 ```powershell
-ssh genemini
+ssh gene-mini
 tmux new-session -A -s claudehome-my-project -c ~/projects/claudecode/my-project 'claude; exec $SHELL'
 ```
 
@@ -144,7 +144,7 @@ All configuration is via environment variables. There is no config file in v1.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `CLAUDEHOME_HOST` | `genemini` | Tailscale hostname of the Mac mini |
+| `CLAUDEHOME_HOST` | `gene-mini` | Tailscale hostname of the Mac mini |
 | `CLAUDEHOME_USER` | `$USER` on the client | SSH user on the Mac mini |
 | `CLAUDEHOME_PROJECTS_DIR` | `~/projects/claudecode` | Projects root **on the Mac mini** |
 
@@ -174,13 +174,13 @@ Project directory names with spaces, quotes, or other shell-special characters a
 
 ## Troubleshooting
 
-- **`cannot reach genemini via SSH`**
-  Check `tailscale status` on both devices — both should show the other as connected. Make sure Mac mini's Remote Login is on. Test with a plain `ssh genemini echo ok`.
+- **`cannot reach gene-mini via SSH`**
+  Check `tailscale status` on both devices — both should show the other as connected. Make sure Mac mini's Remote Login is on. Test with a plain `ssh gene-mini echo ok`.
 
 - **`no projects found in ~/projects/claudecode`**
   Create the directory and a first project on the Mac mini:
   ```sh
-  ssh genemini 'mkdir -p ~/projects/claudecode/my-first-project'
+  ssh gene-mini 'mkdir -p ~/projects/claudecode/my-first-project'
   ```
 
 - **Picker falls back to numbered menu instead of arrow keys**
@@ -194,7 +194,7 @@ Project directory names with spaces, quotes, or other shell-special characters a
 
 - **Cleaning up orphaned sessions.** If you delete a project directory from `~/projects/claudecode`, its tmux session lingers. Remove it with:
   ```
-  ssh genemini 'tmux kill-session -t claudehome-<project-name>'
+  ssh gene-mini 'tmux kill-session -t claudehome-<project-name>'
   ```
 
 ## Non-goals (v1)
