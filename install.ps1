@@ -157,27 +157,38 @@ if (-not (Test-Path -LiteralPath $keyPath)) {
     Write-Ok "Key generated."
 }
 
-if (Test-SshOk $chosenUser $chosenHost) {
-    Write-Ok "SSH access to $chosenUser@$chosenHost confirmed. ✓"
-} else {
-    Write-Ok "SSH key not yet authorized on $chosenHost. Copying..."
-    $pub = (Get-Content -LiteralPath $pubPath -Raw).Trim()
-    $sshCopyId = Get-Command ssh-copy-id.exe -ErrorAction SilentlyContinue
-    if ($sshCopyId) {
-        & ssh-copy-id.exe "$chosenUser@$chosenHost"
-    } else {
-        # Fallback: manual append over SSH
-        & ssh.exe "$chosenUser@$chosenHost" `
-            "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '$pub' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-    }
-    if (Test-SshOk $chosenUser $chosenHost) {
-        Write-Ok "SSH access confirmed. ✓"
-    } else {
-        Write-Err "SSH still failing. Make sure Remote Login is enabled on the Mac mini:"
+$sshAttempts = 0
+while (-not (Test-SshOk $chosenUser $chosenHost)) {
+    $sshAttempts++
+    if ($sshAttempts -gt 3) {
+        Write-Err "SSH still failing after 3 attempts. Check Remote Login is on:"
         Write-Host "  System Settings → General → Sharing → Remote Login: on"
         exit 1
     }
+    Write-Ok "SSH key not yet authorized on $chosenHost. Copying..."
+    $pub = (Get-Content -LiteralPath $pubPath -Raw).Trim()
+    $sshCopyId = Get-Command ssh-copy-id.exe -ErrorAction SilentlyContinue
+    $copyOk = $false
+    if ($sshCopyId) {
+        & ssh-copy-id.exe "$chosenUser@$chosenHost"
+        $copyOk = ($LASTEXITCODE -eq 0)
+    } else {
+        & ssh.exe "$chosenUser@$chosenHost" `
+            "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '$pub' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+        $copyOk = ($LASTEXITCODE -eq 0)
+    }
+    if (-not $copyOk) {
+        Write-Host ""
+        Write-Host "  Could not connect. The username '$chosenUser' may be wrong."
+        $newUser = Read-Host "  Re-enter Mac mini SSH username (or press Enter to keep '$chosenUser')"
+        if (-not [string]::IsNullOrWhiteSpace($newUser)) {
+            $chosenUser = $newUser.Trim()
+            Set-RcValue 'CLAUDEHOME_USER' $chosenUser
+            Write-Ok "Updated CLAUDEHOME_USER=$chosenUser"
+        }
+    }
 }
+Write-Ok "SSH access to $chosenUser@$chosenHost confirmed. ✓"
 
 # ── Step 9: fzf (optional) ────────────────────────────────────────────────────
 Write-Step "Optional: fzf (arrow-key picker)"
