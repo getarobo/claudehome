@@ -100,7 +100,7 @@ _ssh_ok() {
 }
 
 _tailscale_peers() {
-  tailscale status 2>/dev/null \
+  "$TAILSCALE" status 2>/dev/null \
     | awk 'NR>1 { print $2 }' \
     | grep -v '^$' \
     | head -10 \
@@ -110,15 +110,21 @@ _tailscale_peers() {
 # ── Step 3: Tailscale check ──────────────────────────────────────────────────
 echo ""
 echo "── Checking Tailscale ──────────────────────────────────────────────────────"
+# macOS GUI install puts the binary in the app bundle, not on PATH.
+TAILSCALE=tailscale
 if ! command -v tailscale >/dev/null 2>&1; then
-  echo "install: Tailscale not found."
-  echo "  1. Download and install: https://tailscale.com/download"
-  echo "  2. Log in to the same Tailscale account you use on the Mac mini."
-  echo "  3. Re-run: ./install.sh"
-  open "https://tailscale.com/download" 2>/dev/null || true
-  exit 0
+  if [[ -x "/Applications/Tailscale.app/Contents/MacOS/Tailscale" ]]; then
+    TAILSCALE="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+  else
+    echo "install: Tailscale not found."
+    echo "  1. Download and install: https://tailscale.com/download"
+    echo "  2. Log in to the same Tailscale account you use on the Mac mini."
+    echo "  3. Re-run: ./install.sh"
+    open "https://tailscale.com/download" 2>/dev/null || true
+    exit 0
+  fi
 fi
-if ! tailscale status >/dev/null 2>&1; then
+if ! "$TAILSCALE" status >/dev/null 2>&1; then
   echo "install: Tailscale is installed but not logged in or not running."
   echo "  Open the Tailscale menu bar app and log in, then re-run: ./install.sh"
   exit 0
