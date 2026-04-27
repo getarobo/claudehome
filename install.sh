@@ -131,6 +131,19 @@ if ! "$TAILSCALE" status >/dev/null 2>&1; then
 fi
 echo "install: Tailscale is running. ✓"
 
+# ── Clear stale shell-rc exports (config file is now the source of truth) ────
+for var in CLAUDEHOME_HOST CLAUDEHOME_USER CLAUDEHOME_PROJECTS_DIR; do
+  # Unset from the current session immediately.
+  unset "$var" 2>/dev/null || true
+  # Remove any `export CLAUDEHOME_*=...` lines from the shell rc.
+  if grep -qE "^export ${var}=" "$SHELL_RC" 2>/dev/null; then
+    _tmp=$(mktemp)
+    grep -v "^export ${var}=" "$SHELL_RC" > "$_tmp"
+    mv "$_tmp" "$SHELL_RC"
+    echo "install: removed stale 'export ${var}' from ${SHELL_RC} (now read from ${RC})."
+  fi
+done
+
 # ── Step 4: init config file ─────────────────────────────────────────────────
 if [[ ! -f "$RC" ]]; then
   cat > "$RC" <<'EOF'
