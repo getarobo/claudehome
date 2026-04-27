@@ -75,9 +75,9 @@ function Set-RcValue([string]$key, [string]$val) {
     }
 }
 
-function Test-SshOk([string]$user, [string]$host) {
+function Test-SshOk([string]$user, [string]$sshHost) {
     try {
-        $result = & ssh.exe -o BatchMode=yes -o ConnectTimeout=5 "$user@$host" echo ok 2>$null
+        $result = & ssh.exe -o BatchMode=yes -o ConnectTimeout=5 "$user@$sshHost" echo ok 2>$null
         $LASTEXITCODE -eq 0 -and $result -eq 'ok'
     } catch { $false }
 }
