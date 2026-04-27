@@ -118,7 +118,7 @@ brew install --cask tailscale
 brew install fzf
 
 # 3. Clone this repo and install the CLI
-git clone git@github.com:sr-gene/claudehome.git ~/projects/claudehome
+git clone git@github.com:getarobo/claudehome.git ~/projects/claudehome
 cd ~/projects/claudehome
 ./install.sh                 # symlinks bin/claudehome into ~/.local/bin
 # or: ./install.sh --system  # symlinks into /usr/local/bin (requires sudo)
@@ -208,7 +208,7 @@ ssh -o BatchMode=yes genehan@gene-mini echo ok    # expect: ok   (no password pr
 **Install the CLI:**
 
 ```powershell
-git clone git@github.com:sr-gene/claudehome.git $HOME\projects\claudehome
+git clone git@github.com:getarobo/claudehome.git $HOME\projects\claudehome
 Set-Location $HOME\projects\claudehome
 .\install.ps1
 ```
