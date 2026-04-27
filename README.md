@@ -36,7 +36,13 @@ System Settings → General → Sharing → **Remote Login: on**.
 
 **3. [From your client] Authorize your key and sanity-check.**
 
-If your **client username** (the name in your MacBook prompt, `echo $USER`) differs from your **mini account name** (e.g. `gene` on the laptop but `genehan` on the mini), you **must** pass the mini user explicitly to `ssh-copy-id`. Otherwise your key gets authorized for the wrong remote account and `claudehome` will fail later with `Permission denied` under BatchMode even though `ssh gene-mini` appears to work (because it silently falls back to password auth).
+First, confirm your mini's actual account name — it may differ from what you expect:
+
+```sh
+ssh gene-mini 'echo $USER'    # prints the mini account name, e.g. genehan
+```
+
+If your **client username** (`echo $USER` on your Mac) differs from your **mini account name**, you **must** pass the mini user explicitly to `ssh-copy-id`. Otherwise your key gets authorized for the wrong remote account and `claudehome` will fail with `Permission denied` even after setup looks correct.
 
 ```sh
 ssh-copy-id genehan@gene-mini                        # replace genehan with your mini user
@@ -127,7 +133,13 @@ source ~/.zshrc
 
 Use `~/.bashrc` instead of `~/.zshrc` if you run bash. Verify with `which claudehome` — it should print `~/.local/bin/claudehome`.
 
-**If your client's `$USER` doesn't match your mini account**, tell `claudehome` the correct remote user. Otherwise it defaults to the client's `$USER` and SSH rejects the auth (you'll see `cannot reach $USER@gene-mini over SSH` even after the mini is fully set up):
+**If your client's `$USER` doesn't match your mini account**, the cleanest fix is an SSH config entry — SSH rewrites the username transparently and you don't need to set `CLAUDEHOME_USER` at all:
+
+```sh
+echo -e "\nHost gene-mini\n  User genehan" >> ~/.ssh/config   # replace genehan with your mini user
+```
+
+Alternatively, set the env var in your shell rc:
 
 ```sh
 echo 'export CLAUDEHOME_USER=genehan' >> ~/.zshrc   # replace genehan with your mini user
@@ -203,7 +215,13 @@ Set-Location $HOME\projects\claudehome
 
 Open a **new** pwsh (or cmd.exe) window, then run `claudehome`.
 
-**If your Windows username differs from your mini account**, tell claudehome the correct remote user (permanent, survives reboots):
+**If your Windows username differs from your mini account**, the cleanest fix is an SSH config entry — SSH rewrites the username transparently and you don't need to set `CLAUDEHOME_USER` at all:
+
+```powershell
+Add-Content "$HOME\.ssh\config" "`nHost gene-mini`n  User genehan`n"
+```
+
+Alternatively, set the env var permanently (survives reboots):
 
 ```powershell
 [Environment]::SetEnvironmentVariable('CLAUDEHOME_USER', 'genehan', 'User')
@@ -277,6 +295,14 @@ Project directory names with spaces, quotes, or other shell-special characters a
 
 ## Troubleshooting
 
+- **`Permission denied (publickey)` from the client**
+  The SSH key isn't in the right user's `authorized_keys` on the mini. Confirm the mini's actual account name (`ssh gene-mini 'echo $USER'`), then re-add the key explicitly:
+  ```sh
+  ssh-copy-id <mini-user>@gene-mini
+  ssh -o BatchMode=yes <mini-user>@gene-mini echo ok   # must print ok before claudehome will work
+  ```
+  Also check that `~/.ssh` is `700` and `~/.ssh/authorized_keys` is `600` on the mini.
+
 - **`cannot reach gene-mini via SSH`**
   Check `tailscale status` on both devices — both should show the other as connected. Make sure Mac mini's Remote Login is on. Test with a plain `ssh gene-mini echo ok`.
 
@@ -303,7 +329,6 @@ Project directory names with spaces, quotes, or other shell-special characters a
 ## Non-goals (v1)
 
 - Web UI, native mobile app
-- Windows / PC client (PowerShell version is planned)
 - iPhone client (planned — likely via Blink or mosh + tmux)
 - Project scaffolding (`claudehome new`) — create directories manually
 - Session management subcommands (`ls`, `kill`, `attach <name>`)
