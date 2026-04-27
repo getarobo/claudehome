@@ -289,7 +289,7 @@ Project directory names with spaces, quotes, or other shell-special characters a
 
 - **Picker** shows every direct subdirectory of the projects root, with `[active …]` if a `claudehome-<name>` tmux session exists, `[idle]` otherwise. `[active …]` includes the last-activity timestamp (e.g. `2h ago`).
 - **Attach** creates the tmux session if it doesn't exist, launches `claude` inside it, and drops you into the live pane. Subsequent attaches resume the same session.
-- **Detach**: `Ctrl-b d` — same as vanilla tmux. Session keeps running on the Mac mini.
+- **Detach**: `Ctrl-b d` — two separate keystrokes: press `Ctrl+b` together then release, then press `d`. Session keeps running on the Mac mini.
 - **Exit claude**: `/exit` (or `Ctrl-D`) inside Claude Code drops to a shell prompt in the same tmux session. The session stays alive; run `claude` again to resume in place.
 - **Disconnect** (close lid, Tailscale drops, terminal killed): nothing on the Mac mini changes. Reconnect later with `claudehome` and pick the same project.
 
