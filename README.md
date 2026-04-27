@@ -209,8 +209,17 @@ Pick one and you're in.
 |---|---|
 | Detach (leave session running) | `Ctrl-b` then `d` |
 | Exit Claude Code | `/exit` or `Ctrl-D` |
+| Scroll up/down | `Ctrl-b` then `[`, then arrow keys or Page Up/Down. Press `q` to exit. |
 
-> `Ctrl-b d` is **two separate keystrokes**: hold `Ctrl+b` together, release, then press `d`.
+> `Ctrl-b` is the tmux prefix — two separate keystrokes: hold `Ctrl+b` together, release, then press the next key.
+
+**Enable mouse scrolling** (recommended — add once on the Mac mini):
+
+```sh
+echo 'set -g mouse on' >> ~/.tmux.conf && tmux source ~/.tmux.conf
+```
+
+After this, mouse wheel scrolls directly inside tmux without needing scroll mode.
 
 **Disconnect** (close lid, kill terminal, lose Tailscale): nothing on the mini changes. Reconnect later with `claudehome` and pick the same project.
 
