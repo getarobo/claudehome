@@ -147,10 +147,13 @@ if ($existingUser) {
 
 # ── Clear stale user-level env vars (config file is now the source of truth) ──
 foreach ($varName in @('CLAUDEHOME_HOST', 'CLAUDEHOME_USER', 'CLAUDEHOME_PROJECTS_DIR')) {
-    $existing = [Environment]::GetEnvironmentVariable($varName, 'User')
-    if ($existing) {
+    if ([Environment]::GetEnvironmentVariable($varName, 'User')) {
         [Environment]::SetEnvironmentVariable($varName, $null, 'User')
         Write-Ok "Cleared stale user env var $varName (now read from $rcPath)."
+    }
+    # Also clear from the current session so claudehome works immediately.
+    if (Test-Path "Env:$varName") {
+        Remove-Item "Env:$varName"
     }
 }
 
