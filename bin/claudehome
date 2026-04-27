@@ -13,12 +13,16 @@ Usage: claudehome
   shows tmux session state for each, and attaches via SSH over Tailscale.
   Sessions are named claudehome-<project> and outlive any claude process.
 
-Environment variables:
-  CLAUDEHOME_HOST          Tailscale hostname of the Mac mini   (default: gene-mini)
+Environment variables (or set in ~/.claudehomerc):
+  CLAUDEHOME_HOST          Tailscale hostname of the Mac mini   (required)
   CLAUDEHOME_USER          SSH user on the Mac mini             (default: $USER)
   CLAUDEHOME_PROJECTS_DIR  Projects root on the Mac mini        (default: ~/projects/claudecode)
 
-Detach from an attached session with tmux's standard binding: Ctrl-b d.
+Config file: ~/.claudehomerc — written by install.sh. Format: KEY=VALUE, one per line.
+Environment variables take precedence over values in the config file.
+
+Detach from an attached session with tmux's standard binding:
+  Ctrl-b then d  (two keystrokes: hold Ctrl+b, release, then press d)
 The tmux session keeps running on the Mac mini after you disconnect.
 
 Note: CLAUDEHOME_PROJECTS_DIR is a path on the Mac mini. If you use a
@@ -28,10 +32,32 @@ USAGE
   exit 0
 fi
 
+# ---- load config file (env vars take precedence) ----
+RC="${HOME}/.claudehomerc"
+if [[ -f "$RC" ]]; then
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+    if [[ "$line" =~ ^(CLAUDEHOME_[A-Z_]+)=(.*)$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      val="${BASH_REMATCH[2]}"
+      if ! printenv "$key" >/dev/null 2>&1; then
+        export "$key"="$val"
+      fi
+    fi
+  done < "$RC"
+fi
+
 # ---- config ----
-HOST="${CLAUDEHOME_HOST:-gene-mini}"
+HOST="${CLAUDEHOME_HOST:-}"
 REMOTE_USER="${CLAUDEHOME_USER:-$USER}"
 PROJECTS_DIR="${CLAUDEHOME_PROJECTS_DIR:-~/projects/claudecode}"
+
+if [[ -z "$HOST" ]]; then
+  echo "claudehome: CLAUDEHOME_HOST is not set." >&2
+  echo "  Run ./install.sh to configure, or: export CLAUDEHOME_HOST=<tailscale-hostname>" >&2
+  exit 1
+fi
 
 # ---- validate config ----
 # These values are interpolated into a remote `bash -c '...'` command. Strict

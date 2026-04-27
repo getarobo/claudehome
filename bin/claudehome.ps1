@@ -15,12 +15,16 @@ Usage: claudehome
   shows tmux session state for each, and attaches via SSH over Tailscale.
   Sessions are named claudehome-<project> and outlive any claude process.
 
-Environment variables:
-  CLAUDEHOME_HOST          Tailscale hostname of the Mac mini   (default: gene-mini)
+Environment variables (or set in ~/.claudehomerc):
+  CLAUDEHOME_HOST          Tailscale hostname of the Mac mini   (required)
   CLAUDEHOME_USER          SSH user on the Mac mini             (default: $env:USERNAME)
   CLAUDEHOME_PROJECTS_DIR  Projects root on the Mac mini        (default: ~/projects/claudecode)
 
-Detach from an attached session with tmux's standard binding: Ctrl-b d.
+Config file: ~/.claudehomerc — written by install.ps1. Format: KEY=VALUE, one per line.
+Environment variables take precedence over values in the config file.
+
+Detach from an attached session with tmux's standard binding:
+  Ctrl-b then d  (two keystrokes: hold Ctrl+b, release, then press d)
 The tmux session keeps running on the Mac mini after you disconnect.
 
 Note: CLAUDEHOME_PROJECTS_DIR is a path on the Mac mini. If you use a
@@ -30,8 +34,22 @@ the tilde locally: $env:CLAUDEHOME_PROJECTS_DIR = '~/other/root'
     exit 0
 }
 
+# ---- load config file (env vars take precedence) ----
+$rcPath = Join-Path $HOME '.claudehomerc'
+if (Test-Path -LiteralPath $rcPath) {
+    foreach ($line in (Get-Content -LiteralPath $rcPath)) {
+        if ($line -match '^\s*#' -or [string]::IsNullOrWhiteSpace($line)) { continue }
+        if ($line -match '^(CLAUDEHOME_[A-Z_]+)=(.*)$') {
+            $k = $Matches[1]; $v = $Matches[2]
+            if (-not (Test-Path "Env:$k")) {
+                Set-Item "Env:$k" $v
+            }
+        }
+    }
+}
+
 # ---- config ----
-$HostName    = if ($env:CLAUDEHOME_HOST)          { $env:CLAUDEHOME_HOST }          else { 'gene-mini' }
+$HostName    = if ($env:CLAUDEHOME_HOST)          { $env:CLAUDEHOME_HOST }          else { $null }
 $RemoteUser  = if ($env:CLAUDEHOME_USER)          { $env:CLAUDEHOME_USER }          else { $env:USERNAME }
 $ProjectsDir = if ($env:CLAUDEHOME_PROJECTS_DIR)  { $env:CLAUDEHOME_PROJECTS_DIR }  else { '~/projects/claudecode' }
 
@@ -45,6 +63,9 @@ $rxProj = '^[a-zA-Z0-9._-]+$'
 
 function Die([string]$msg) { [Console]::Error.WriteLine($msg); exit 1 }
 
+if (-not $HostName) {
+    Die "claudehome: CLAUDEHOME_HOST is not set.`n  Run .\install.ps1 to configure, or: `$env:CLAUDEHOME_HOST = '<tailscale-hostname>'"
+}
 if ($HostName    -notmatch $rxHost) { Die "claudehome: CLAUDEHOME_HOST='$HostName' has unsupported characters.`n  Allowed: letters, digits, '.', '_', '-'" }
 if ($RemoteUser  -notmatch $rxUser) { Die "claudehome: CLAUDEHOME_USER='$RemoteUser' has unsupported characters.`n  Allowed: letters, digits, '.', '_', '-'" }
 if ($ProjectsDir -notmatch $rxPath) { Die "claudehome: CLAUDEHOME_PROJECTS_DIR='$ProjectsDir' has unsupported characters.`n  Allowed: letters, digits, '.', '_', '/', '~', '-'" }

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# install.sh — symlink bin/claudehome into a PATH directory.
+# install.sh — install claudehome Mac client and run first-time setup wizard.
 #   Default target: ~/.local/bin (no sudo).
 #   Override:       ./install.sh --system   (uses sudo to target /usr/local/bin)
+#
+# Re-running this script is safe: prompts are skipped for values already saved
+# in ~/.claudehomerc or set in the environment.
 
 set -euo pipefail
 
-# SC2155-clean: declare first, then assign so `cd`/`pwd` failures are not
-# masked by the declaration's exit code.
 REPO_DIR=
 REPO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 if [[ -z "$REPO_DIR" ]]; then
@@ -14,6 +15,7 @@ if [[ -z "$REPO_DIR" ]]; then
   exit 1
 fi
 SRC="${REPO_DIR}/bin/claudehome"
+RC="${HOME}/.claudehomerc"
 
 if [[ ! -x "$SRC" ]]; then
   chmod +x "$SRC" 2>/dev/null || {
@@ -22,6 +24,7 @@ if [[ ! -x "$SRC" ]]; then
   }
 fi
 
+# ---- parse flags ----
 SYSTEM=0
 for arg in "$@"; do
   case "$arg" in
@@ -35,6 +38,7 @@ for arg in "$@"; do
   esac
 done
 
+# ── Step 1: symlink ──────────────────────────────────────────────────────────
 if (( SYSTEM )); then
   TARGET_DIR=/usr/local/bin
   LINK="${TARGET_DIR}/claudehome"
@@ -54,16 +58,177 @@ else
   fi
   ln -sf "$SRC" "$LINK"
   echo "install: symlinked ${LINK} → ${SRC}"
-  case ":$PATH:" in
-    *":${TARGET_DIR}:"*) : ;;
-    *) echo "  warning: ${TARGET_DIR} is not in your PATH."
-       echo "  add this to your shell rc:  export PATH=\"${TARGET_DIR}:\$PATH\"" ;;
-  esac
 fi
 
-if "$LINK" --help >/dev/null 2>&1; then
-  echo "install: done. Run:  claudehome"
+# ── Step 2: ensure TARGET_DIR is on PATH in shell rc ────────────────────────
+if ! (( SYSTEM )); then
+  # Pick the right rc file based on the active shell
+  SHELL_RC="${HOME}/.zshrc"
+  [[ "${SHELL:-}" == */bash ]] && SHELL_RC="${HOME}/.bashrc"
+  if ! grep -qF "${TARGET_DIR}" "$SHELL_RC" 2>/dev/null; then
+    {
+      echo ""
+      echo "# added by claudehome install"
+      echo "export PATH=\"${TARGET_DIR}:\$PATH\""
+    } >> "$SHELL_RC"
+    echo "install: added ${TARGET_DIR} to PATH in ${SHELL_RC}"
+  fi
+fi
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+_rc_get() {
+  local key="$1"
+  [[ -f "$RC" ]] || return 0
+  grep -E "^${key}=" "$RC" 2>/dev/null | tail -1 | cut -d= -f2- || true
+}
+
+_rc_set() {
+  local key="$1" val="$2"
+  if [[ -f "$RC" ]] && grep -qE "^${key}=" "$RC" 2>/dev/null; then
+    local tmp
+    tmp=$(mktemp)
+    grep -v "^${key}=" "$RC" > "$tmp"
+    echo "${key}=${val}" >> "$tmp"
+    mv "$tmp" "$RC"
+  else
+    echo "${key}=${val}" >> "$RC"
+  fi
+}
+
+_ssh_ok() {
+  ssh -o BatchMode=yes -o ConnectTimeout=5 "${1}@${2}" echo ok >/dev/null 2>&1
+}
+
+_tailscale_peers() {
+  tailscale status 2>/dev/null \
+    | awk 'NR>1 { print $2 }' \
+    | grep -v '^$' \
+    | head -10 \
+    || true
+}
+
+# ── Step 3: Tailscale check ──────────────────────────────────────────────────
+echo ""
+echo "── Checking Tailscale ──────────────────────────────────────────────────────"
+if ! command -v tailscale >/dev/null 2>&1; then
+  echo "install: Tailscale not found."
+  echo "  1. Download and install: https://tailscale.com/download"
+  echo "  2. Log in to the same Tailscale account you use on the Mac mini."
+  echo "  3. Re-run: ./install.sh"
+  open "https://tailscale.com/download" 2>/dev/null || true
+  exit 0
+fi
+if ! tailscale status >/dev/null 2>&1; then
+  echo "install: Tailscale is installed but not logged in or not running."
+  echo "  Open the Tailscale menu bar app and log in, then re-run: ./install.sh"
+  exit 0
+fi
+echo "install: Tailscale is running. ✓"
+
+# ── Step 4: init config file ─────────────────────────────────────────────────
+if [[ ! -f "$RC" ]]; then
+  cat > "$RC" <<'EOF'
+# claudehome config — written by install.sh
+# Environment variables take precedence over this file.
+EOF
+  echo "install: created ${RC}"
+fi
+
+echo ""
+echo "── Mac mini configuration ──────────────────────────────────────────────────"
+
+# ── Step 5: CLAUDEHOME_HOST ──────────────────────────────────────────────────
+EXISTING_HOST="${CLAUDEHOME_HOST:-$(_rc_get CLAUDEHOME_HOST)}"
+if [[ -n "$EXISTING_HOST" ]]; then
+  echo "install: CLAUDEHOME_HOST already set to '${EXISTING_HOST}' — skipping."
+  CHOSEN_HOST="$EXISTING_HOST"
 else
-  echo "install: symlink created but \`claudehome --help\` failed; check PATH." >&2
+  PEERS=$(_tailscale_peers)
+  if [[ -n "$PEERS" ]]; then
+    echo "Tailscale peers (pick one):"
+    echo "$PEERS" | sed 's/^/  /'
+  fi
+  read -r -p "Enter Mac mini Tailscale hostname: " CHOSEN_HOST
+  if [[ -z "$CHOSEN_HOST" ]]; then
+    echo "install: hostname required." >&2
+    exit 1
+  fi
+  _rc_set CLAUDEHOME_HOST "$CHOSEN_HOST"
+  echo "install: saved CLAUDEHOME_HOST=${CHOSEN_HOST}"
+fi
+
+# ── Step 6: CLAUDEHOME_USER ──────────────────────────────────────────────────
+EXISTING_USER="${CLAUDEHOME_USER:-$(_rc_get CLAUDEHOME_USER)}"
+if [[ -n "$EXISTING_USER" ]]; then
+  echo "install: CLAUDEHOME_USER already set to '${EXISTING_USER}' — skipping."
+  CHOSEN_USER="$EXISTING_USER"
+else
+  read -r -p "Enter Mac mini SSH username (default: ${USER}): " CHOSEN_USER
+  CHOSEN_USER="${CHOSEN_USER:-$USER}"
+  _rc_set CLAUDEHOME_USER "$CHOSEN_USER"
+  echo "install: saved CLAUDEHOME_USER=${CHOSEN_USER}"
+fi
+
+# ── Step 7: SSH key ──────────────────────────────────────────────────────────
+echo ""
+echo "── SSH key setup ───────────────────────────────────────────────────────────"
+KEY="${HOME}/.ssh/id_ed25519"
+if [[ ! -f "$KEY" ]]; then
+  echo "install: no SSH key found. Generating ~/.ssh/id_ed25519…"
+  mkdir -p "${HOME}/.ssh"
+  chmod 700 "${HOME}/.ssh"
+  ssh-keygen -t ed25519 -f "$KEY" -N "" -C "$(hostname -s)"
+  echo "install: key generated."
+fi
+
+if _ssh_ok "$CHOSEN_USER" "$CHOSEN_HOST"; then
+  echo "install: SSH access to ${CHOSEN_USER}@${CHOSEN_HOST} confirmed. ✓"
+else
+  echo "install: SSH key not yet authorized on ${CHOSEN_HOST}. Copying…"
+  if command -v ssh-copy-id >/dev/null 2>&1; then
+    ssh-copy-id "${CHOSEN_USER}@${CHOSEN_HOST}"
+  else
+    PUB=$(cat "${KEY}.pub")
+    # shellcheck disable=SC2029
+    ssh "${CHOSEN_USER}@${CHOSEN_HOST}" \
+      "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '${PUB}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+  fi
+  if _ssh_ok "$CHOSEN_USER" "$CHOSEN_HOST"; then
+    echo "install: SSH access confirmed. ✓"
+  else
+    echo "install: SSH still failing. Make sure Remote Login is enabled on the Mac mini:" >&2
+    echo "  System Settings → General → Sharing → Remote Login: on" >&2
+    exit 1
+  fi
+fi
+
+# ── Step 8: fzf (optional) ───────────────────────────────────────────────────
+echo ""
+echo "── Optional: fzf (arrow-key picker) ───────────────────────────────────────"
+if command -v fzf >/dev/null 2>&1; then
+  echo "install: fzf already installed. ✓"
+elif command -v brew >/dev/null 2>&1; then
+  echo "install: installing fzf via Homebrew…"
+  brew install fzf \
+    || echo "install: fzf install failed (non-fatal — numbered menu will be used)."
+else
+  echo "install: fzf not found and Homebrew not available."
+  echo "  Numbered menu will be used. To enable arrow-key picker: brew install fzf"
+fi
+
+# ── Smoke test + summary ──────────────────────────────────────────────────────
+echo ""
+if "$LINK" --help >/dev/null 2>&1; then
+  echo "────────────────────────────────────────────────────────────────────────────"
+  echo "claudehome installed successfully."
+  echo ""
+  echo "  Host:    ${CHOSEN_HOST}"
+  echo "  User:    ${CHOSEN_USER}"
+  echo "  Config:  ${RC}"
+  echo ""
+  echo "Run:  claudehome"
+else
+  echo "install: smoke test failed — claudehome --help returned non-zero." >&2
+  echo "  Make sure ${TARGET_DIR} is in your PATH." >&2
   exit 1
 fi

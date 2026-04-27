@@ -28,26 +28,23 @@ Two roles: **server** (Mac mini, always on) and **client** (any device you conne
 
 The Mac mini needs only `tmux`, a logged-in `claude`, and SSH enabled — it never needs this repo installed. The `claudehome` CLI lives on the client.
 
-> **Before you start:** Know your mini's account name. It may differ from what you expect.
-> Run this from any client that can already SSH in (or type it at the mini's Terminal):
-> ```sh
-> echo $USER
-> ```
+> **Before you start:** Know your mini's account name — it may differ from what you expect.
+> At the mini's Terminal (or over SSH if you can already connect): `echo $USER`
 > Use that value wherever you see `<mini-user>` below.
 
 ---
 
 ### 1. Mac mini — server (one-time)
 
-**Steps 1–2 require physical access (GUI). Everything after can run remotely.**
+**Steps 1a–1b require physical access (GUI). Everything after runs remotely.**
 
 #### 1a. Install Tailscale
 
 Download from https://tailscale.com/download, open the app, log in to the **same Tailscale account** your clients use.
 
-- In the [Tailscale admin console](https://login.tailscale.com/admin/machines), confirm the mini appears.
-- Under the **DNS** tab, enable **MagicDNS** so clients can reach it by name (e.g. `gene-mini`).
-- If the mini's Tailscale hostname isn't `gene-mini`, rename it on the admin page or set `CLAUDEHOME_HOST` on your clients later.
+- Confirm the mini appears in the [Tailscale admin console](https://login.tailscale.com/admin/machines).
+- Under the **DNS** tab, enable **MagicDNS** so clients can reach it by name (e.g. `<mini-host>`).
+- If the mini's Tailscale hostname isn't what you want, rename it on the admin page or set `CLAUDEHOME_HOST` on your clients later.
 
 #### 1b. Enable SSH
 
@@ -58,13 +55,13 @@ Download from https://tailscale.com/download, open the app, log in to the **same
 From your client, copy your key to the mini using the mini's actual account name:
 
 ```sh
-ssh-copy-id <mini-user>@gene-mini
+ssh-copy-id <mini-user>@<mini-host>
 ```
 
 Verify it works without a password prompt:
 
 ```sh
-ssh -o BatchMode=yes <mini-user>@gene-mini echo ok   # must print: ok
+ssh -o BatchMode=yes <mini-user>@<mini-host> echo ok   # must print: ok
 ```
 
 Once this returns `ok`, every remaining step can run remotely — no need to return to the mini.
@@ -72,7 +69,7 @@ Once this returns `ok`, every remaining step can run remotely — no need to ret
 #### 1d. Install tmux
 
 ```sh
-ssh gene-mini 'brew install tmux'
+ssh <mini-host> 'brew install tmux'
 ```
 
 #### 1e. Install Claude Code
@@ -80,34 +77,34 @@ ssh gene-mini 'brew install tmux'
 Skip if `claude` is already installed on the mini.
 
 ```sh
-ssh gene-mini 'curl -fsSL https://claude.ai/install.sh | bash'
+ssh <mini-host> 'curl -fsSL https://claude.ai/install.sh | bash'
 ```
 
 #### 1f. Fix the SSH PATH
 
-macOS SSH sessions load `~/.zshenv` but **not** `~/.zshrc`, so tools installed via Homebrew are invisible over SSH by default. Without this step, `ssh gene-mini 'claude'` returns `command not found`.
+macOS SSH sessions load `~/.zshenv` but **not** `~/.zshrc`, so tools installed via Homebrew are invisible over SSH by default. Without this step, `ssh <mini-host> 'claude'` returns `command not found`.
 
 Apple Silicon:
 ```sh
 echo 'export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"' \
-  | ssh gene-mini 'cat >> ~/.zshenv'
+  | ssh <mini-host> 'cat >> ~/.zshenv'
 ```
 
 Intel Mac:
 ```sh
 echo 'export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"' \
-  | ssh gene-mini 'cat >> ~/.zshenv'
+  | ssh <mini-host> 'cat >> ~/.zshenv'
 ```
 
 Verify:
 ```sh
-ssh gene-mini 'which claude tmux'   # both paths should print
+ssh <mini-host> 'which claude tmux'   # both paths should print
 ```
 
 #### 1g. Create the projects root
 
 ```sh
-ssh gene-mini 'mkdir -p ~/projects/claudecode'
+ssh <mini-host> 'mkdir -p ~/projects/claudecode'
 ```
 
 #### 1h. Log Claude Code in (first time only)
@@ -115,7 +112,7 @@ ssh gene-mini 'mkdir -p ~/projects/claudecode'
 A fresh `claude` needs OAuth credentials. This requires an interactive TTY:
 
 ```sh
-ssh -t <mini-user>@gene-mini claude
+ssh -t <mini-user>@<mini-host> claude
 ```
 
 Claude prints a login URL. Open it in any browser, complete sign-in, paste the code back. Credentials save to `~/.claude/` on the mini and persist across reboots.
@@ -128,76 +125,36 @@ Claude prints a login URL. Open it in any browser, complete sign-in, paste the c
 # Install Tailscale (same tailnet as the mini)
 brew install --cask tailscale
 
-# Install fzf (optional — enables arrow-key picker)
-brew install fzf
-
 # Clone and install
 git clone git@github.com:getarobo/claudehome.git ~/projects/claudehome
 cd ~/projects/claudehome
 ./install.sh
 ```
 
-If `install.sh` warns that `~/.local/bin` isn't in your `PATH`:
+The installer wizard handles the rest:
 
-```sh
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
-```
+- Checks Tailscale is running (links to download if not)
+- Prompts for your mini's hostname and SSH username
+- Generates an SSH key if you don't have one, then copies it to the mini
+- Installs `fzf` via Homebrew if available (enables arrow-key picker)
+- Appends `~/.local/bin` to your PATH in `~/.zshrc` if needed
+- Saves config to `~/.claudehomerc`
 
-Verify: `which claudehome` should print `~/.local/bin/claudehome`.
-
-**Username mismatch?** If `echo $USER` on your Mac differs from `<mini-user>`, add an SSH config entry:
-
-```sh
-echo -e "\nHost gene-mini\n  User <mini-user>" >> ~/.ssh/config
-```
-
-Or set the env var:
-```sh
-echo 'export CLAUDEHOME_USER=<mini-user>' >> ~/.zshrc && source ~/.zshrc
-```
+Re-running `./install.sh` is safe — prompts are skipped for values already configured.
 
 ---
 
 ### 3. Windows client — PowerShell 7+ (one-time per PC)
 
-#### 3a. Install prerequisites
+Install prerequisites first (if not already present):
 
 ```powershell
-winget install Microsoft.PowerShell    # PowerShell 7 (if not already present)
+winget install Microsoft.PowerShell    # PowerShell 7
 winget install Tailscale.Tailscale     # same tailnet as the mini
-winget install junegunn.fzf            # optional — arrow-key picker
-where.exe ssh                          # verify OpenSSH is present
+where.exe ssh                          # verify OpenSSH is present (pre-installed on Windows 10 1803+)
 ```
 
-#### 3b. Generate and authorize an SSH key
-
-Check for an existing key:
-```powershell
-Test-Path "$HOME\.ssh\id_ed25519.pub"   # true = already have one
-```
-
-If missing, generate one:
-```powershell
-ssh-keygen -t ed25519 -C "my-pc"
-```
-
-Copy the key to the mini:
-```powershell
-ssh-copy-id <mini-user>@gene-mini
-```
-
-If `ssh-copy-id` isn't available, do it manually:
-```powershell
-$pub = Get-Content "$HOME\.ssh\id_ed25519.pub"
-ssh <mini-user>@gene-mini "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '$pub' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-```
-
-Verify:
-```powershell
-ssh -o BatchMode=yes <mini-user>@gene-mini echo ok   # must print: ok
-```
-
-#### 3c. Install the CLI
+Then clone and install:
 
 ```powershell
 git clone git@github.com:getarobo/claudehome.git $HOME\projects\claudehome
@@ -205,19 +162,18 @@ Set-Location $HOME\projects\claudehome
 .\install.ps1
 ```
 
-Open a **new** PowerShell window, then run `claudehome`.
+The installer wizard handles the rest:
 
-**Username mismatch?** If `$env:USERNAME` on your PC differs from `<mini-user>`, add an SSH config entry (recommended):
+- Checks Tailscale is running (links to download if not)
+- Prompts for your mini's hostname and SSH username
+- Generates an SSH key if you don't have one, then copies it to the mini
+- Installs `fzf` via winget if available (enables arrow-key picker)
+- Adds `<repo>\bin` to your user PATH
+- Saves config to `~/.claudehomerc`
 
-```powershell
-Add-Content "$HOME\.ssh\config" "`nHost gene-mini`n  User <mini-user>`n"
-```
+Open a **new** PowerShell window after install, then run `claudehome`.
 
-Or set the env var permanently:
-```powershell
-[Environment]::SetEnvironmentVariable('CLAUDEHOME_USER', '<mini-user>', 'User')
-# Open a new shell after setting — takes effect in new sessions only
-```
+Re-running `.\install.ps1` is safe — prompts are skipped for values already configured.
 
 > **Note:** If you downloaded the repo as a ZIP instead of cloning, run `Unblock-File .\install.ps1` before executing. `git clone` doesn't require this.
 
@@ -227,7 +183,7 @@ Or set the env var permanently:
 
 ### 4. iPhone (not yet)
 
-Deferred. Near-term: use **Blink Shell** with a manual `ssh -t <mini-user>@gene-mini tmux new-session -A -s myproject` command. A scripted `claudehome` for iOS ships later.
+Deferred. Near-term: use **Blink Shell** with a manual `ssh -t <mini-user>@<mini-host> tmux new-session -A -s myproject` command. A scripted `claudehome` for iOS ships later.
 
 ---
 
@@ -262,12 +218,21 @@ Pick one and you're in.
 
 ## Configuration
 
-All configuration is via environment variables. No config file.
+Config is read from `~/.claudehomerc` (written by the installer), then overridden by environment variables. No other config files.
+
+`~/.claudehomerc` format — plain `KEY=VALUE`, `#` comments allowed:
+
+```
+# claudehome config
+CLAUDEHOME_HOST=my-mini
+CLAUDEHOME_USER=myuser
+# CLAUDEHOME_PROJECTS_DIR=~/projects/claudecode
+```
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CLAUDEHOME_HOST` | `gene-mini` | Tailscale hostname of the Mac mini |
-| `CLAUDEHOME_USER` | local `$USER` | SSH username on the Mac mini |
+| `CLAUDEHOME_HOST` | none — required | Tailscale hostname of the Mac mini |
+| `CLAUDEHOME_USER` | local `$USER` / `$env:USERNAME` | SSH username on the Mac mini |
 | `CLAUDEHOME_PROJECTS_DIR` | `~/projects/claudecode` | Projects root on the Mac mini |
 
 Set `CLAUDEHOME_PROJECTS_DIR` with single quotes to prevent local tilde expansion:
@@ -289,21 +254,28 @@ Project directories with spaces or shell-special characters are rejected with a 
 
 ## Troubleshooting
 
-**`Permission denied (publickey)`**
-The SSH key isn't in the right user's `authorized_keys`. Confirm the mini's account name, then re-authorize:
+**`CLAUDEHOME_HOST is not set`**
+Run the installer (`./install.sh` or `.\install.ps1`) to configure, or set the variable manually:
 ```sh
-ssh-copy-id <mini-user>@gene-mini
-ssh -o BatchMode=yes <mini-user>@gene-mini echo ok   # must print: ok
+export CLAUDEHOME_HOST=<mini-host>    # Mac/Linux
+$env:CLAUDEHOME_HOST = '<mini-host>'  # Windows
+```
+
+**`Permission denied (publickey)`**
+The SSH key isn't in the right user's `authorized_keys`. Confirm the mini's account name (`ssh <mini-host> 'echo $USER'`), then re-authorize:
+```sh
+ssh-copy-id <mini-user>@<mini-host>
+ssh -o BatchMode=yes <mini-user>@<mini-host> echo ok   # must print: ok
 ```
 Also verify permissions on the mini: `~/.ssh` must be `700`, `~/.ssh/authorized_keys` must be `600`.
 
-**`cannot reach gene-mini via SSH`**
-Run `tailscale status` on both devices — both should list the other as connected. Confirm Remote Login is on in System Settings. Test with `ssh gene-mini echo ok`.
+**`cannot reach <mini-host> via SSH`**
+Run `tailscale status` on both devices — both should list the other as connected. Confirm Remote Login is on in System Settings. Test with `ssh <mini-host> echo ok`.
 
 **`no projects found in ~/projects/claudecode`**
 Create a project on the mini:
 ```sh
-ssh gene-mini 'mkdir -p ~/projects/claudecode/my-first-project'
+ssh <mini-host> 'mkdir -p ~/projects/claudecode/my-first-project'
 ```
 
 **Picker shows a numbered menu instead of arrow keys**
@@ -318,7 +290,7 @@ The SSH non-interactive shell can't find `claude`. Add its directory to `PATH` i
 **Orphaned tmux sessions**
 If you delete a project directory, its session lingers. Remove it:
 ```sh
-ssh gene-mini 'tmux kill-session -t claudehome-<project-name>'
+ssh <mini-host> 'tmux kill-session -t claudehome-<project-name>'
 ```
 
 ---
@@ -331,6 +303,7 @@ ssh gene-mini 'tmux kill-session -t claudehome-<project-name>'
 - Session management subcommands (`ls`, `kill`, `attach <name>`)
 - Automatic cleanup of orphaned sessions
 - Multi-user or shared Mac mini
+- Server-side bootstrap script (mini setup is manual per Section 1)
 
 ---
 

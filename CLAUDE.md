@@ -8,14 +8,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture (one paragraph)
 
-Each client (`bin/claudehome` on Mac, `bin/claudehome.ps1` on Windows) makes **one** SSH round-trip to the Mac mini over Tailscale, asking the remote to list projects under `CLAUDEHOME_PROJECTS_DIR` and any live tmux sessions. The remote command is wrapped in `bash --norc --noprofile -c '…'` so shell-profile noise (conda, nvm, pyenv, Tailscale banners) cannot contaminate the sentinel-delimited output. The client parses projects + session state, shows a picker (`fzf` preferred, `bash select` / `Read-Host` fallback), then runs `ssh -t … tmux new-session -A -D -s claudehome-<project> -c <dir> "claude; exec $SHELL"`. `tmux new-session -A` is idempotent: attach if the session exists, create if not. The `-D` flag detaches any other clients currently attached to the same session. The `; exec $SHELL` tail keeps the tmux session alive after `claude` exits. There is no daemon, no config file, and no state on the Mac mini beyond the tmux sessions themselves.
+Each client (`bin/claudehome` on Mac, `bin/claudehome.ps1` on Windows) loads config from `~/.claudehomerc` (if present), then makes **one** SSH round-trip to the Mac mini over Tailscale, asking the remote to list projects under `CLAUDEHOME_PROJECTS_DIR` and any live tmux sessions. The remote command is wrapped in `bash --norc --noprofile -c '…'` so shell-profile noise (conda, nvm, pyenv, Tailscale banners) cannot contaminate the sentinel-delimited output. The client parses projects + session state, shows a picker (`fzf` preferred, `bash select` / `Read-Host` fallback), then runs `ssh -t … tmux new-session -A -D -s claudehome-<project> -c <dir> "claude; exec $SHELL"`. `tmux new-session -A` is idempotent: attach if the session exists, create if not. The `-D` flag detaches any other clients currently attached to the same session. The `; exec $SHELL` tail keeps the tmux session alive after `claude` exits.
 
 ## Development
 
 - **Main script (Mac):** `bin/claudehome` (bash, ~150 lines).
 - **Main script (Windows):** `bin/claudehome.ps1` (pwsh 7+, ~150 lines) + `bin/claudehome.cmd` shim.
-- **Installer (Mac):** `install.sh` — symlinks to `~/.local/bin/claudehome` (or `/usr/local/bin` with `--system`).
-- **Installer (Windows):** `install.ps1` — adds `<repo>\bin` to user PATH, verifies shim.
+- **Installer (Mac):** `install.sh` — symlinks CLI, runs setup wizard, writes `~/.claudehomerc`.
+- **Installer (Windows):** `install.ps1` — adds `<repo>\bin` to user PATH, runs setup wizard, writes `~/.claudehomerc`.
+- **Config file:** `~/.claudehomerc` — KEY=VALUE format, written by installers. Env vars take precedence.
 - **Lint (Mac):** `shellcheck bin/claudehome install.sh`.
 - **Lint (Windows):** `Invoke-ScriptAnalyzer bin/claudehome.ps1, install.ps1`.
 - **Smoke test:** `bin/claudehome --help` / `bin/claudehome.ps1 --help` must exit 0 and print usage.
@@ -26,12 +27,13 @@ Each client (`bin/claudehome` on Mac, `bin/claudehome.ps1` on Windows) makes **o
 The following are explicit non-goals — **do not add them** without updating the relevant spec first:
 
 - Subcommands beyond `--help` (`ls`, `kill`, `attach <name>`, `new`)
-- Config files (YAML/TOML/`.claudehomerc`); env vars only
+- Config files beyond `~/.claudehomerc`; that single dotfile is the only allowed config file
 - Daemons, background workers, persistent state files, or anything outside plain tmux
 - iPhone / web clients
 - Packaging (npm, Homebrew formula, Docker, systemd, PowerShell Gallery, winget manifest)
 - `install.ps1 --system` / machine-wide install on Windows
 - PowerShell 5.1 support (pwsh 7+ only for the Windows client)
+- Server-side bootstrap (mini setup remains manual per README)
 
 iPhone client is planned but out of scope for this pass.
 
