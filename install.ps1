@@ -145,6 +145,15 @@ if ($existingUser) {
     Write-Ok "Saved CLAUDEHOME_USER=$chosenUser"
 }
 
+# ── Clear stale user-level env vars (config file is now the source of truth) ──
+foreach ($varName in @('CLAUDEHOME_HOST', 'CLAUDEHOME_USER', 'CLAUDEHOME_PROJECTS_DIR')) {
+    $existing = [Environment]::GetEnvironmentVariable($varName, 'User')
+    if ($existing) {
+        [Environment]::SetEnvironmentVariable($varName, $null, 'User')
+        Write-Ok "Cleared stale user env var $varName (now read from $rcPath)."
+    }
+}
+
 # ── Step 8: SSH key ───────────────────────────────────────────────────────────
 Write-Step "SSH key setup"
 $keyPath = Join-Path $HOME '.ssh' 'id_ed25519'
