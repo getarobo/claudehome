@@ -5,6 +5,17 @@ All notable changes to `claudehome` are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses 4-part versioning: `MAJOR.MINOR.BUILD.REVISION`.
 
+## [1.0.0.0] - 2026-04-27
+
+First production release. Mac + Windows clients are at byte-level parity
+on the user-visible flow (AC1–AC18 / AC-PC1–AC-PC9 documented in
+`.omc/specs/`). Mac client AC13–AC18 verified end-to-end against the live
+Mac mini at this version; PC AC-PC9 still requires hands-on Windows
+verification.
+
+No code changes between `v0.1.0.0` and `v1.0.0.0` — this is purely a
+version-label promotion to mark "v1 shipped".
+
 ## [0.1.0.0] - 2026-04-27
 
 Initial versioning baseline. Captures the state of the repository at the
