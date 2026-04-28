@@ -1,0 +1,27 @@
+# Changelog
+
+All notable changes to `claudehome` are documented in this file.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project uses 4-part versioning: `MAJOR.MINOR.BUILD.REVISION`.
+
+## [0.1.0.0] - 2026-04-27
+
+Initial versioning baseline. Captures the state of the repository at the
+point versioning was introduced.
+
+### Includes
+- Mac client (`bin/claudehome`) with picker, single SSH round-trip, tmux
+  session-follows-the-user behavior (`-A -D`), and idempotent attach.
+- Windows client (`bin/claudehome.ps1` + `.cmd` shim) at byte-level parity
+  with the Mac client.
+- `install.sh` and `install.ps1` setup wizards with config file
+  (`~/.claudehomerc`), Tailscale + SSH key onboarding, and optional `fzf`.
+- `[new project]` picker option for in-line project creation
+  (`mkdir -p` folded into the attach payload, single round-trip preserved).
+- Recency-ordered picker: active sessions sorted by `tmux session_activity`
+  descending, idle projects alphabetical below, `[new project]` last.
+- `--reverse` fzf layout so the cursor lands on the most-recently-used
+  project at the top.
+- Acceptance criteria AC1–AC18 (Mac) and AC-PC1–AC-PC9 (PC) documented in
+  `.omc/specs/`.
