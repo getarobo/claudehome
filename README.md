@@ -193,13 +193,13 @@ Deferred. Near-term: use **Blink Shell** with a manual `ssh -t <mini-user>@<mini
 claudehome
 ```
 
-A picker shows every project under `~/projects/claudecode` on the mini, annotated with session state. The first row is always `[new project]`:
+A picker shows every project under `~/projects/claudecode` on the mini, annotated with session state. Active sessions are ordered by recency (most-recently-used at top); idle projects sit below them alphabetically; the `[new project]` option is always the last row:
 
 ```
-▸ [new project]
-  my-api-project  [active 2h ago]
+▸ my-api-project  [active 2h ago]
   landing-page    [active 1d ago]
   side-tool       [idle]
+  [new project]
 ```
 
 Pick an existing project and you're in. Pick `[new project]` and you're prompted for a name — `claudehome` creates the directory on the mini and starts a fresh session there. Names use the same allowlist as env vars (letters, digits, `.` `_` `-`); duplicates are refused with a retry, empty input cancels.

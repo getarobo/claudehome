@@ -109,13 +109,18 @@ TMUX_BLOCK="${RAW#*---TMUX---}"
 # look up each project with awk. No bash-4 associative array needed (macOS ships
 # bash 3.2 by default, so this stays portable without a Homebrew bash dependency).
 #
-# `[new project]` is always the first row so the picker is never empty and the
-# user can create their first project from a fresh install.
+# Ordering: active projects first, sorted by tmux session activity descending
+# (most-recently-used at top); idle projects below them, alphabetical; the
+# `[new project]` sentinel is always the last row.
 NEW_PROJECT_ROW='[new project]'
-PICKER_LINES=("$NEW_PROJECT_ROW")
 PICKER_NAMES=()
 NOW=$(date +%s)
 
+# Build sortable rows as "<sort_key>\t<display_line>" lines. Active projects
+# use the tmux activity timestamp as the key (so larger = more recent); idle
+# projects use 0 so they cluster below active. Secondary sort on the line
+# itself gives alphabetical order within the idle group.
+SORT_INPUT=
 while IFS= read -r project; do
   [[ -z "$project" ]] && continue
   ts=$(awk -v s="claudehome-${project}" '$1==s { print $2; exit }' <<< "$TMUX_BLOCK")
@@ -127,12 +132,21 @@ while IFS= read -r project; do
     elif (( age < 86400 )); then label="$(( age / 3600 ))h ago"
     else                         label="$(( age / 86400 ))d ago"
     fi
-    PICKER_LINES+=("${project}  [active ${label}]")
+    SORT_INPUT+="${ts}"$'\t'"${project}  [active ${label}]"$'\n'
   else
-    PICKER_LINES+=("${project}  [idle]")
+    SORT_INPUT+="0"$'\t'"${project}  [idle]"$'\n'
   fi
   PICKER_NAMES+=("$project")
 done <<< "$PROJECTS_BLOCK"
+
+PICKER_LINES=()
+if [[ -n "$SORT_INPUT" ]]; then
+  while IFS=$'\t' read -r _key line; do
+    [[ -z "$line" ]] && continue
+    PICKER_LINES+=("$line")
+  done < <(printf '%s' "$SORT_INPUT" | sort -t$'\t' -k1,1nr -k2,2)
+fi
+PICKER_LINES+=("$NEW_PROJECT_ROW")
 
 # ---- picker (fzf preferred, bash `select` fallback) ----
 SELECTED=

@@ -122,14 +122,15 @@ foreach ($line in ($tmuxBlock -split "`r?`n")) {
 }
 
 # ---- build picker rows ----
-# `[new project]` is always the first row so the picker is never empty and the
-# user can create their first project from a fresh install.
+# Ordering: active projects first, sorted by tmux session activity descending
+# (most-recently-used at top); idle projects below them, alphabetical; the
+# `[new project]` sentinel is always the last row.
 $NewProjectRow = '[new project]'
-$pickerLines = [System.Collections.Generic.List[string]]::new()
-$pickerLines.Add($NewProjectRow)
 $pickerNames = [System.Collections.Generic.List[string]]::new()
 $now = [DateTimeOffset]::Now.ToUnixTimeSeconds()
 
+# Collect rows with a numeric sort key (tmux activity for active, 0 for idle).
+$rows = [System.Collections.Generic.List[object]]::new()
 foreach ($project in ($projectsBlock -split "`r?`n")) {
     $project = $project.Trim()
     if ([string]::IsNullOrEmpty($project)) { continue }
@@ -141,12 +142,18 @@ foreach ($project in ($projectsBlock -split "`r?`n")) {
                  elseif ($age -lt 3600)  { "$([Math]::Floor($age / 60))m ago" }
                  elseif ($age -lt 86400) { "$([Math]::Floor($age / 3600))h ago" }
                  else                    { "$([Math]::Floor($age / 86400))d ago" }
-        $pickerLines.Add("$project  [active $label]")
+        $rows.Add([PSCustomObject]@{ Key = [int64]$sessions[$sname]; Line = "$project  [active $label]" })
     } else {
-        $pickerLines.Add("$project  [idle]")
+        $rows.Add([PSCustomObject]@{ Key = [int64]0; Line = "$project  [idle]" })
     }
     $pickerNames.Add($project)
 }
+
+$pickerLines = [System.Collections.Generic.List[string]]::new()
+foreach ($row in ($rows | Sort-Object @{Expression='Key'; Descending=$true}, @{Expression='Line'; Descending=$false})) {
+    $pickerLines.Add($row.Line)
+}
+$pickerLines.Add($NewProjectRow)
 
 # ---- picker (fzf preferred, Read-Host numbered menu fallback) ----
 $selected = $null
