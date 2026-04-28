@@ -159,7 +159,7 @@ $pickerLines.Add($NewProjectRow)
 $selected = $null
 $fzf = Get-Command fzf.exe -ErrorAction SilentlyContinue
 if ($fzf) {
-    $selected = ($pickerLines -join "`n") | & fzf.exe --prompt='claudehome> ' --height=~50%
+    $selected = ($pickerLines -join "`n") | & fzf.exe --prompt='claudehome> ' --height=~50% --reverse
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($selected)) { exit 0 }
 } else {
     for ($i = 0; $i -lt $pickerLines.Count; $i++) {

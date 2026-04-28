@@ -151,7 +151,7 @@ PICKER_LINES+=("$NEW_PROJECT_ROW")
 # ---- picker (fzf preferred, bash `select` fallback) ----
 SELECTED=
 if command -v fzf >/dev/null 2>&1; then
-  SELECTED=$(printf '%s\n' "${PICKER_LINES[@]}" | fzf --prompt='claudehome> ' --height=~50%) || exit 0
+  SELECTED=$(printf '%s\n' "${PICKER_LINES[@]}" | fzf --prompt='claudehome> ' --height=~50% --reverse) || exit 0
 else
   PS3='Select a project: '
   select SELECTED in "${PICKER_LINES[@]}"; do
