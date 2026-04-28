@@ -13,6 +13,10 @@ Usage: claudehome
   shows tmux session state for each, and attaches via SSH over Tailscale.
   Sessions are named claudehome-<project> and outlive any claude process.
 
+  The first picker row is [new project] — pick it to create a fresh
+  directory on the Mac mini and start a session there. Names are validated
+  against the same allowlist applied to env vars; duplicates are refused.
+
 Environment variables (or set in ~/.claudehomerc):
   CLAUDEHOME_HOST          Tailscale hostname of the Mac mini   (required)
   CLAUDEHOME_USER          SSH user on the Mac mini             (default: $USER)
@@ -104,7 +108,11 @@ TMUX_BLOCK="${RAW#*---TMUX---}"
 # We keep TMUX_BLOCK as a newline-separated string of "session_name ts" pairs and
 # look up each project with awk. No bash-4 associative array needed (macOS ships
 # bash 3.2 by default, so this stays portable without a Homebrew bash dependency).
-PICKER_LINES=()
+#
+# `[new project]` is always the first row so the picker is never empty and the
+# user can create their first project from a fresh install.
+NEW_PROJECT_ROW='[new project]'
+PICKER_LINES=("$NEW_PROJECT_ROW")
 PICKER_NAMES=()
 NOW=$(date +%s)
 
@@ -126,12 +134,6 @@ while IFS= read -r project; do
   PICKER_NAMES+=("$project")
 done <<< "$PROJECTS_BLOCK"
 
-if (( ${#PICKER_NAMES[@]} == 0 )); then
-  echo "claudehome: no projects found in ${PROJECTS_DIR} on ${HOST}." >&2
-  echo "  Create one with: ssh ${REMOTE_USER}@${HOST} 'mkdir -p ${PROJECTS_DIR}/my-project'" >&2
-  exit 1
-fi
-
 # ---- picker (fzf preferred, bash `select` fallback) ----
 SELECTED=
 if command -v fzf >/dev/null 2>&1; then
@@ -145,8 +147,31 @@ else
   [[ -z "${SELECTED:-}" ]] && exit 0
 fi
 
-# Extract project name (everything before the double-space annotation)
-PROJECT="${SELECTED%%  *}"
+# Resolve the picked row into a project name. The `[new project]` sentinel
+# triggers an inline prompt loop; otherwise extract the name from the row
+# (everything before the double-space annotation column).
+if [[ "$SELECTED" == "$NEW_PROJECT_ROW" ]]; then
+  PROJECT=
+  while [[ -z "$PROJECT" ]]; do
+    read -r -p "New project name: " NEW_PROJECT_NAME || exit 0
+    [[ -z "$NEW_PROJECT_NAME" ]] && exit 0
+    if [[ ! "$NEW_PROJECT_NAME" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+      echo "  '${NEW_PROJECT_NAME}' has unsupported characters. Allowed: letters, digits, '.', '_', '-'. Try again." >&2
+      continue
+    fi
+    DUP=0
+    for existing in "${PICKER_NAMES[@]}"; do
+      [[ "$existing" == "$NEW_PROJECT_NAME" ]] && { DUP=1; break; }
+    done
+    if (( DUP )); then
+      echo "  '${NEW_PROJECT_NAME}' already exists. Pick a different name." >&2
+      continue
+    fi
+    PROJECT="$NEW_PROJECT_NAME"
+  done
+else
+  PROJECT="${SELECTED%%  *}"
+fi
 
 # Revalidate the project name with the same allowlist applied to env vars —
 # a malicious or accidental directory name on the Mac mini should not be able
@@ -166,7 +191,12 @@ fi
 # me across devices" behavior — picking up from a new device kicks the old
 # one off cleanly instead of mirroring views and collapsing to the smaller
 # terminal's dimensions.
+#
+# `mkdir -p` is idempotent: a no-op for existing projects, and creates the
+# directory (and the projects root if missing) for newly-named ones picked
+# via the `[new project]` prompt.
 # shellcheck disable=SC2029
 exec ssh -t "${REMOTE_USER}@${HOST}" "bash --norc --noprofile -c '
+  mkdir -p ${PROJECTS_DIR}/${PROJECT}
   tmux new-session -A -D -s claudehome-${PROJECT} -c ${PROJECTS_DIR}/${PROJECT} \"claude; exec \$SHELL\"
 '"

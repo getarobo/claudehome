@@ -93,7 +93,7 @@ The v1 scope is the **Mac client only**. PC (PowerShell) and iPhone (mosh/Blink/
 - Web UI, native mobile app, or any non-terminal interface
 - Windows/PC client
 - iPhone client
-- Project scaffolding (`claudehome new <name>`) — create directories manually via SSH
+- Project scaffolding *via subcommand* (`claudehome new <name>`); see AC13–AC17 for the in-picker `[new project]` flow
 - Session management commands (`ls`, `kill`, `attach <name>`)
 - Named-arg attach (`claudehome <project>`)
 - Session TTL / auto-cleanup of ghost sessions
@@ -118,6 +118,11 @@ Each criterion is concrete enough to be a test. Call the client Mac "laptop" and
 - [ ] **AC10** — macmini has no claudehome-side daemon, config file, or persistent state. Only artifacts on macmini are tmux sessions and any directories the user created under the projects root.
 - [ ] **AC11** — Detach keybinding is standard tmux `Ctrl-b d`. No custom bindings, no wrapper rendering. The attached terminal behaves identically to an SSH'd-in `tmux attach` against the same session.
 - [ ] **AC12** — When `fzf` is present, the picker uses it. When absent, the picker falls back to bash `select` and the tool still works.
+- [ ] **AC13** — `[new project]` is always the first row of the picker, even when `CLAUDEHOME_PROJECTS_DIR` is empty or does not yet exist on the mini.
+- [ ] **AC14** — Selecting `[new project]` prompts `New project name:`. Empty input (or EOF) cancels cleanly with exit code 0; control does **not** loop back to the picker.
+- [ ] **AC15** — Names containing characters outside `^[a-zA-Z0-9._-]+$` are rejected with a retry message that names the offending input. The same allowlist applied to env vars governs new-project names.
+- [ ] **AC16** — Names matching an existing project directory under `CLAUDEHOME_PROJECTS_DIR` are rejected with a retry message naming the duplicate; only a fresh name proceeds.
+- [ ] **AC17** — A valid fresh name causes the directory to be created on the mini (`mkdir -p` folded into the attach payload, single SSH round-trip preserved) and the user lands at a `claude` prompt in the new directory. `mkdir -p` is idempotent: re-running with an existing name is a no-op for the directory and falls through to normal attach.
 
 ## Assumptions Exposed & Resolved
 

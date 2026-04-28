@@ -15,6 +15,10 @@ Usage: claudehome
   shows tmux session state for each, and attaches via SSH over Tailscale.
   Sessions are named claudehome-<project> and outlive any claude process.
 
+  The first picker row is [new project] — pick it to create a fresh
+  directory on the Mac mini and start a session there. Names are validated
+  against the same allowlist applied to env vars; duplicates are refused.
+
 Environment variables (or set in ~/.claudehomerc):
   CLAUDEHOME_HOST          Tailscale hostname of the Mac mini   (required)
   CLAUDEHOME_USER          SSH user on the Mac mini             (default: $env:USERNAME)
@@ -118,7 +122,11 @@ foreach ($line in ($tmuxBlock -split "`r?`n")) {
 }
 
 # ---- build picker rows ----
+# `[new project]` is always the first row so the picker is never empty and the
+# user can create their first project from a fresh install.
+$NewProjectRow = '[new project]'
 $pickerLines = [System.Collections.Generic.List[string]]::new()
+$pickerLines.Add($NewProjectRow)
 $pickerNames = [System.Collections.Generic.List[string]]::new()
 $now = [DateTimeOffset]::Now.ToUnixTimeSeconds()
 
@@ -138,10 +146,6 @@ foreach ($project in ($projectsBlock -split "`r?`n")) {
         $pickerLines.Add("$project  [idle]")
     }
     $pickerNames.Add($project)
-}
-
-if ($pickerNames.Count -eq 0) {
-    Die "claudehome: no projects found in $ProjectsDir on $HostName.`n  Create one with: ssh $RemoteUser@$HostName 'mkdir -p $ProjectsDir/my-project'"
 }
 
 # ---- picker (fzf preferred, Read-Host numbered menu fallback) ----
@@ -167,8 +171,27 @@ if ($fzf) {
     }
 }
 
-# Extract project name (everything before the double-space annotation).
-$project = ($selected -split '  ', 2)[0]
+# Resolve the picked row into a project name. The `[new project]` sentinel
+# triggers an inline prompt loop; otherwise extract the name from the row
+# (everything before the double-space annotation column).
+if ($selected -eq $NewProjectRow) {
+    $project = ''
+    while ([string]::IsNullOrEmpty($project)) {
+        $newName = Read-Host 'New project name'
+        if ([string]::IsNullOrEmpty($newName)) { exit 0 }
+        if ($newName -notmatch $rxProj) {
+            [Console]::Error.WriteLine("  '$newName' has unsupported characters. Allowed: letters, digits, '.', '_', '-'. Try again.")
+            continue
+        }
+        if ($pickerNames -contains $newName) {
+            [Console]::Error.WriteLine("  '$newName' already exists. Pick a different name.")
+            continue
+        }
+        $project = $newName
+    }
+} else {
+    $project = ($selected -split '  ', 2)[0]
+}
 
 # Revalidate the project name — a malicious or accidental directory name on the
 # Mac mini should not break out of the remote bash -c quoting.
@@ -181,8 +204,11 @@ if ($project -notmatch $rxProj) {
 # .Replace() used (not -f) for consistency with the fetch payload — prevents
 # FormatException if anyone later adds tmux #{...} format tokens to this template.
 # -A -D: attach if session exists (create otherwise), and detach any other clients.
+# `mkdir -p` is idempotent: a no-op for existing projects, and creates the
+# directory (and the projects root if missing) for newly-named ones.
 $attachTpl = @'
 bash --norc --noprofile -c '
+  mkdir -p __PROJECTS_DIR__/__PROJECT__
   tmux new-session -A -D -s claudehome-__PROJECT__ -c __PROJECTS_DIR__/__PROJECT__ "claude; exec $SHELL"
 '
 '@

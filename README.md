@@ -193,15 +193,16 @@ Deferred. Near-term: use **Blink Shell** with a manual `ssh -t <mini-user>@<mini
 claudehome
 ```
 
-A picker shows every project under `~/projects/claudecode` on the mini, annotated with session state:
+A picker shows every project under `~/projects/claudecode` on the mini, annotated with session state. The first row is always `[new project]`:
 
 ```
-▸ my-api-project  [active 2h ago]
+▸ [new project]
+  my-api-project  [active 2h ago]
   landing-page    [active 1d ago]
   side-tool       [idle]
 ```
 
-Pick one and you're in.
+Pick an existing project and you're in. Pick `[new project]` and you're prompted for a name — `claudehome` creates the directory on the mini and starts a fresh session there. Names use the same allowlist as env vars (letters, digits, `.` `_` `-`); duplicates are refused with a retry, empty input cancels.
 
 ### Key bindings
 
@@ -281,12 +282,6 @@ Also verify permissions on the mini: `~/.ssh` must be `700`, `~/.ssh/authorized_
 **`cannot reach <mini-host> via SSH`**
 Run `tailscale status` on both devices — both should list the other as connected. Confirm Remote Login is on in System Settings. Test with `ssh <mini-host> echo ok`.
 
-**`no projects found in ~/projects/claudecode`**
-Create a project on the mini:
-```sh
-ssh <mini-host> 'mkdir -p ~/projects/claudecode/my-first-project'
-```
-
 **Picker shows a numbered menu instead of arrow keys**
 `fzf` isn't installed on your client. Install it (`brew install fzf` / `winget install junegunn.fzf`) and it takes over automatically.
 
@@ -308,7 +303,7 @@ ssh <mini-host> 'tmux kill-session -t claudehome-<project-name>'
 
 - Web UI or native mobile app
 - iPhone client (planned — Blink Shell in the meantime)
-- Project scaffolding (`claudehome new`) — create directories manually
+- `claudehome new <name>` subcommand — use the `[new project]` picker option instead (no extra CLI surface added)
 - Session management subcommands (`ls`, `kill`, `attach <name>`)
 - Automatic cleanup of orphaned sessions
 - Multi-user or shared Mac mini

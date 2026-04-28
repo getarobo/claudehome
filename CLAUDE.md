@@ -26,7 +26,7 @@ Each client (`bin/claudehome` on Mac, `bin/claudehome.ps1` on Windows) loads con
 
 The following are explicit non-goals — **do not add them** without updating the relevant spec first:
 
-- Subcommands beyond `--help` (`ls`, `kill`, `attach <name>`, `new`)
+- Subcommands beyond `--help` (`ls`, `kill`, `attach <name>`, `new <name>`) — to create a project, use the in-picker `[new project]` option (AC13–AC17). The CLI surface stays at `claudehome` / `claudehome --help`; no extra args.
 - Config files beyond `~/.claudehomerc`; that single dotfile is the only allowed config file
 - Daemons, background workers, persistent state files, or anything outside plain tmux
 - iPhone / web clients
@@ -56,3 +56,4 @@ After running `.\install.ps1`, open a **new** pwsh window and run the following 
 - **AC-PC6** — Attach from MacBook to a project, then pick the same project from the PC — MacBook detaches cleanly.
 - **AC-PC7** — Attached `claude` renders correctly in WezTerm (ANSI colors, spinner, status line).
 - **AC-PC8** — From `cmd.exe`, typing `claudehome` launches the tool via the `.cmd` shim.
+- **AC-PC9** — `[new project]` is the first picker row. Selecting it prompts for a name, refuses duplicates and disallowed characters with a retry, and lands the user at a `claude` prompt in the new directory on the mini (parity with Mac AC13–AC17).
