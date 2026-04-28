@@ -226,6 +226,38 @@ After this, mouse wheel scrolls directly inside tmux without needing scroll mode
 
 ---
 
+## Sending files
+
+`claudehome` is a session-attach tool — it doesn't transfer files. For that, use any SFTP client. Your existing Tailscale hostname and SSH key already work; nothing new to configure.
+
+> Tailscale doesn't replace SFTP — it's a network layer underneath. To an SFTP client, your Mac mini is just a regular hostname reachable over SSH on port 22. There's no Tailscale-specific setting inside the SFTP client.
+
+| Platform | Recommended client | Where |
+|---|---|---|
+| Mac | **Cyberduck** | https://cyberduck.io |
+| Windows | **WinSCP** | https://winscp.net |
+| Cross-platform | **FileZilla** | https://filezilla-project.org |
+
+**Cyberduck (Mac)** — *Open Connection* → **SFTP (SSH File Transfer Protocol)**:
+
+- Server: your `CLAUDEHOME_HOST` value (Tailscale hostname)
+- Username: your `CLAUDEHOME_USER` value
+- SSH Private Key: `~/.ssh/id_ed25519`
+
+Connect, then navigate to `projects/claudecode/<project>/`.
+
+**WinSCP (Windows)** — *New Site* → File protocol: **SFTP**:
+
+- Host name: your Tailscale hostname
+- User name: your mini SSH user
+- *Advanced → SSH → Authentication →* Private key file: `~/.ssh/id_ed25519`
+
+Modern WinSCP reads OpenSSH keys directly; older versions prompt to convert to `.ppk` once.
+
+Files dropped into a project folder are visible in the next `claudehome` attach to that project. If Tailscale drops on the client, the SFTP connection drops too — same as `claudehome`. Reconnect Tailscale and retry.
+
+---
+
 ## Configuration
 
 Config is read from `~/.claudehomerc` (written by the installer), then overridden by environment variables. No other config files.
