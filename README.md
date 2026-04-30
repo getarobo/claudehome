@@ -195,9 +195,36 @@ Re-running `.\install_client.ps1` is safe — prompts are skipped for values alr
 
 ---
 
-### 4. iPhone (not yet)
+### 4. iPhone
 
-Deferred. Near-term: use **Blink Shell** with a manual `ssh -t <mini-user>@<mini-host> tmux new-session -A -s myproject` command. A scripted `claudehome` for iOS ships later.
+The iPhone client is **any iOS SSH app** + Tailscale + the `claudehome` CLI installed on the mini in *local mode* (so SSH'ing in and typing `claudehome` gives you the same picker as on the desktop, without a loopback SSH).
+
+**1. Install Tailscale on iPhone** — App Store → "Tailscale" → log in with the same account as the mini → toggle on.
+
+**2. Install an SSH client.** Recommended:
+
+- **Termius** (free tier is enough) — polished UI, real tmux support. Free tier limitation: no iCloud key sync, but you only have one phone.
+- **Blink Shell** ($, ~\$20/yr) — adds Mosh (resilient over flaky cellular), custom on-screen keyboards. Worth it if you'll use this every day.
+- *Skip iSH* — it's a local Linux emulator on the phone, not an SSH client. Wrong tool for this.
+
+**3. Generate an SSH key in the app and authorize it on the mini.** In Termius: *Vaults → Keys → + → Generate* (Ed25519). Share/copy the public key, then on any machine that already has SSH access:
+
+```sh
+echo '<paste ssh-ed25519 AAAA... line>' | ssh <mini-host> 'cat >> ~/.ssh/authorized_keys'
+```
+
+**4. Add a host entry.** In Termius: *Vaults → Hosts → + →* Hostname `<mini-host>`, Username `<mini-user>`, Key = the one you just made.
+
+**5. Install claudehome on the mini in local mode** (one-time, on the mini itself):
+
+```sh
+cd /path/to/claudehome
+./install_server.sh
+```
+
+This symlinks the `claudehome` CLI into your PATH on the mini and writes `CLAUDEHOME_LOCAL=1`. Now SSH'ing in and typing `claudehome` opens the picker locally — no loopback SSH.
+
+**6. Connect.** Tap the host in Termius. At the mini's prompt, type `claudehome`. Same picker, same `[new project]` flow. Detach with `Ctrl-b d` (Termius and Blink both make `Ctrl` a one-tap key on the on-screen bar).
 
 ---
 
