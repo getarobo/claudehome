@@ -210,13 +210,15 @@ if ($project -notmatch $rxProj) {
 # Single-quoted here-string keeps $SHELL literal for remote bash expansion.
 # .Replace() used (not -f) for consistency with the fetch payload — prevents
 # FormatException if anyone later adds tmux #{...} format tokens to this template.
-# -A -D: attach if session exists (create otherwise), and detach any other clients.
+# -A (no -D): attach if session exists (create otherwise). Multiple clients
+# may stay attached to the same session simultaneously — tmux reflows to the
+# most-recently-active client.
 # `mkdir -p` is idempotent: a no-op for existing projects, and creates the
 # directory (and the projects root if missing) for newly-named ones.
 $attachTpl = @'
 bash --norc --noprofile -c '
   mkdir -p __PROJECTS_DIR__/__PROJECT__
-  tmux new-session -A -D -s claudehome-__PROJECT__ -c __PROJECTS_DIR__/__PROJECT__ "claude; exec $SHELL"
+  tmux new-session -A -s claudehome-__PROJECT__ -c __PROJECTS_DIR__/__PROJECT__ "claude; exec $SHELL"
 '
 '@
 $attachCmd = $attachTpl.Replace('__PROJECT__', $project).Replace('__PROJECTS_DIR__', $ProjectsDir)

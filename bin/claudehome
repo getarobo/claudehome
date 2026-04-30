@@ -200,11 +200,11 @@ fi
 # Session is eternal; `claude; exec $SHELL` drops to a shell when claude
 # exits so you can relaunch in place without a new tmux session.
 #
-# `-A -D` means: attach if exists (create otherwise), AND detach any other
-# clients currently attached to the same session. This gives "session follows
-# me across devices" behavior — picking up from a new device kicks the old
-# one off cleanly instead of mirroring views and collapsing to the smaller
-# terminal's dimensions.
+# `-A` means: attach if exists, create otherwise. We deliberately omit `-D`
+# so multiple clients can stay attached to the same session simultaneously
+# — walk from PC to MacBook to phone and all views stay live. Tmux sizes the
+# window to the most-recently-active client, so reflow follows wherever you
+# typed last.
 #
 # `mkdir -p` is idempotent: a no-op for existing projects, and creates the
 # directory (and the projects root if missing) for newly-named ones picked
@@ -212,5 +212,5 @@ fi
 # shellcheck disable=SC2029
 exec ssh -t "${REMOTE_USER}@${HOST}" "bash --norc --noprofile -c '
   mkdir -p ${PROJECTS_DIR}/${PROJECT}
-  tmux new-session -A -D -s claudehome-${PROJECT} -c ${PROJECTS_DIR}/${PROJECT} \"claude; exec \$SHELL\"
+  tmux new-session -A -s claudehome-${PROJECT} -c ${PROJECTS_DIR}/${PROJECT} \"claude; exec \$SHELL\"
 '"

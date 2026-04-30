@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture (one paragraph)
 
-Each client (`bin/claudehome` on Mac, `bin/claudehome.ps1` on Windows) loads config from `~/.claudehomerc` (if present), then makes **one** SSH round-trip to the Mac mini over Tailscale, asking the remote to list projects under `CLAUDEHOME_PROJECTS_DIR` and any live tmux sessions. The remote command is wrapped in `bash --norc --noprofile -c '…'` so shell-profile noise (conda, nvm, pyenv, Tailscale banners) cannot contaminate the sentinel-delimited output. The client parses projects + session state, shows a picker (`fzf` preferred, `bash select` / `Read-Host` fallback), then runs `ssh -t … tmux new-session -A -D -s claudehome-<project> -c <dir> "claude; exec $SHELL"`. `tmux new-session -A` is idempotent: attach if the session exists, create if not. The `-D` flag detaches any other clients currently attached to the same session. The `; exec $SHELL` tail keeps the tmux session alive after `claude` exits.
+Each client (`bin/claudehome` on Mac, `bin/claudehome.ps1` on Windows) loads config from `~/.claudehomerc` (if present), then makes **one** SSH round-trip to the Mac mini over Tailscale, asking the remote to list projects under `CLAUDEHOME_PROJECTS_DIR` and any live tmux sessions. The remote command is wrapped in `bash --norc --noprofile -c '…'` so shell-profile noise (conda, nvm, pyenv, Tailscale banners) cannot contaminate the sentinel-delimited output. The client parses projects + session state, shows a picker (`fzf` preferred, `bash select` / `Read-Host` fallback), then runs `ssh -t … tmux new-session -A -s claudehome-<project> -c <dir> "claude; exec $SHELL"`. `tmux new-session -A` is idempotent: attach if the session exists, create if not. We deliberately omit `-D` so multiple clients may stay attached to the same session simultaneously (tmux reflows to the most-recently-active client). The `; exec $SHELL` tail keeps the tmux session alive after `claude` exits.
 
 ## Development
 
@@ -53,7 +53,7 @@ After running `.\install_client.ps1`, open a **new** pwsh window and run the fol
 - **AC-PC3** — `$env:CLAUDEHOME_HOST = 'alt-host'; claudehome` targets `alt-host` in the error message.
 - **AC-PC4** — `$env:CLAUDEHOME_HOST = 'evil;rm'; claudehome` exits 1 with "unsupported characters".
 - **AC-PC5** — With fzf on PATH: arrow-key picker. Without fzf: numbered `Read-Host` menu. Both show `[active …]`/`[idle]` annotations.
-- **AC-PC6** — Attach from MacBook to a project, then pick the same project from the PC — MacBook detaches cleanly.
+- **AC-PC6** — Attach from MacBook to a project, then pick the same project from the PC — both clients remain attached to the session simultaneously, sharing live view (tmux reflows to whichever client typed last).
 - **AC-PC7** — Attached `claude` renders correctly in WezTerm (ANSI colors, spinner, status line).
 - **AC-PC8** — From `cmd.exe`, typing `claudehome` launches the tool via the `.cmd` shim.
 - **AC-PC9** — `[new project]` is the **last** picker row, with existing projects above it ordered by tmux activity descending (idle ones alphabetical below the active group). Selecting it prompts for a name, refuses duplicates and disallowed characters with a retry, and lands the user at a `claude` prompt in the new directory on the mini (parity with Mac AC13–AC18).

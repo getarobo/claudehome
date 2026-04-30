@@ -34,7 +34,7 @@ The Mac mini (server) is untouched — no server-side changes.
 
 ### Architecture — unchanged from v1
 - Transport: SSH over Tailscale. Uses Windows OpenSSH (`C:\Windows\System32\OpenSSH\ssh.exe`, on PATH since Windows 10 1803).
-- Session persistence: tmux on the Mac mini. Same session naming `claudehome-<project>`, same `-A -D` flags, same `claude; exec $SHELL` launch.
+- Session persistence: tmux on the Mac mini. Same session naming `claudehome-<project>`, same `-A` flag (no `-D` — see AC-PC6 amendment 2026-04-30), same `claude; exec $SHELL` launch.
 - Remote command wrapping: identical `bash --norc --noprofile -c '…'` payload. No PC-specific variation.
 
 ### Configuration
@@ -97,7 +97,7 @@ AC1–AC12 from `.omc/specs/deep-interview-claudehome-v1.md` are the PC test man
 - [ ] **AC-PC3** (Env vars) — `$env:CLAUDEHOME_HOST = 'alt-host'; claudehome` targets `alt-host`. Permanent user env var via `[Environment]::SetEnvironmentVariable(...,'User')` also takes effect in new pwsh sessions. Overrides work for `CLAUDEHOME_USER` and `CLAUDEHOME_PROJECTS_DIR` identically.
 - [ ] **AC-PC4** (Injection guards) — `$env:CLAUDEHOME_HOST = 'evil;rm'; claudehome` exits non-zero with a clear `unsupported characters` message, same class as the bash version. Same for PROJECTS_DIR with a single quote, USER with a space, and project directories with special chars.
 - [ ] **AC-PC5** (Picker fallback) — With `fzf.exe` on PATH, the picker is fzf. Rename/remove it (or run via `Remove-Item Env:PATH; claudehome` scenario), and the script falls back to a `Read-Host` numbered menu. Both paths show `[active <age>]` / `[idle]` annotations identical to bash.
-- [ ] **AC-PC6** (`-A -D` semantics) — Attach from MacBook to `hello`. From the PC, run `claudehome`, pick `hello`. Expect: MacBook session cleanly detaches; PC takes over. Verifies `-D` flag is present in the remote command after PS quoting.
+- [ ] **AC-PC6** (multi-client shared attach) — *Amended 2026-04-30: previous version asserted `-D` kicked the older client. We now deliberately omit `-D` so multiple clients stay attached simultaneously.* Attach from MacBook to `hello`. From the PC, run `claudehome`, pick `hello`. Expect: both clients remain attached, share the same live view, and tmux reflows to whichever client typed last. Verifies `-D` is absent from the remote command after PS quoting.
 - [ ] **AC-PC7** (TTY + rendering) — Attached `claude` renders correctly in WezTerm on the PC: ANSI colors, spinner, claude status line all visible and unmangled. (Same check applies in Windows Terminal, but WezTerm is the documented happy path.)
 - [ ] **AC-PC8** (Shim invocation) — From a `cmd.exe` prompt (not pwsh), typing `claudehome` launches the tool successfully via the `.cmd` shim. This verifies the shim works for non-pwsh shells, not just pwsh.
 - [ ] **AC-PC9** (New-project parity) — All of AC13–AC18 from the parent spec pass identically when invoked from `claudehome.ps1` on Windows: `[new project]` is the last picker row; `Read-Host` prompts `New project name`; empty input exits 0; allowlist + duplicate names trigger retry; a fresh name creates the directory on the mini and attaches the user to a `claude` prompt in it via the same single SSH round-trip; existing projects are ordered by tmux activity descending with idle ones alphabetical below.
