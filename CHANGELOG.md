@@ -5,6 +5,18 @@ All notable changes to `claudehome` are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses 4-part versioning: `MAJOR.MINOR.BUILD.REVISION`.
 
+## [1.0.2.0] - 2026-04-30
+
+### Added
+- **Local mode for `claudehome` on the mini itself.** When `CLAUDEHOME_HOST` resolves to one of this machine's own IPs (auto-detected via hostname/IP intersection, or forced with `CLAUDEHOME_LOCAL=1`), the bash client skips the SSH layer entirely and runs the picker + tmux attach locally. Common case: SSH'd into the mini from an iPhone (Termius/Blink) — same picker UX, no loopback hop. Detection layers: explicit override → `localhost`/`127.*`/`::1` → hostname forms → IP-resolution intersection (catches macOS `LocalHostName` vs `HostName` vs Tailscale node-name variants). Spec amendment: AC-LOCAL1–3 in the v1 spec.
+- **`install_server.sh`.** Focused installer for the mini itself: symlinks the CLI, writes `CLAUDEHOME_LOCAL=1` to `~/.claudehomerc`, and skips Tailscale / `ssh-copy-id` guidance (irrelevant when installing on the server). Scope is the CLI install only — tmux/claude/Tailscale bootstrap stays manual per README §1.
+
+### Changed
+- **Multi-client shared attach.** Removed `-D` from `tmux new-session -A -D` in both `bin/claudehome` and `bin/claudehome.ps1`. Multiple clients can now stay attached to the same session simultaneously — walk between PC, MacBook, and phone with all views live. Tmux reflows to whichever client typed last. AC-PC6 amended (previous wording asserted the kick behavior).
+
+### Fixed
+- **Help-text wording.** `claudehome --help` (Mac + PC) now correctly states that `[new project]` is the **last** picker row (was previously "first" — predated the recency-ordering change in `9623ed5`).
+
 ## [1.0.1.0] - 2026-04-29
 
 ### Changed

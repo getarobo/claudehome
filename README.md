@@ -1,3 +1,5 @@
+Version 1.0.2.0 — 2026-04-30
+
 # claudehome
 
 **Persistent Claude Code sessions on your Mac mini, accessible from any device.**
