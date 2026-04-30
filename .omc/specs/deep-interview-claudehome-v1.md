@@ -125,6 +125,14 @@ Each criterion is concrete enough to be a test. Call the client Mac "laptop" and
 - [ ] **AC17** — A valid fresh name causes the directory to be created on the mini (`mkdir -p` folded into the attach payload, single SSH round-trip preserved) and the user lands at a `claude` prompt in the new directory. `mkdir -p` is idempotent: re-running with an existing name is a no-op for the directory and falls through to normal attach.
 - [ ] **AC18** — Existing-project rows are ordered by recency: active sessions first, sorted by tmux `session_activity` descending (most-recently-used at top); idle projects (no tmux session) cluster below the active group, sorted alphabetically. The `[new project]` sentinel always follows the project list.
 
+### Amendment 2026-04-30: local mode (AC-LOCAL1–3)
+
+When SSH'd into the mini from another device (iPhone Termius/Blink, etc.), running `claudehome` on the mini itself should give the same picker UX without making a loopback SSH connection. A local-execution branch was added to `bin/claudehome`. Detection: `CLAUDEHOME_LOCAL=1|0` overrides; otherwise compare `CLAUDEHOME_HOST` to localhost / 127.* / hostname forms / IP-resolution intersection with this machine's interfaces (catches every macOS hostname variant — `LocalHostName` vs `HostName` vs Tailscale node name).
+
+- [ ] **AC-LOCAL1** — On the mini, with `CLAUDEHOME_HOST` set to its own Tailscale node name, `claudehome` runs the picker and tmux attach without invoking `ssh`. Tracing under `bash -x` shows zero `ssh` invocations and `LOCAL_MODE=1`.
+- [ ] **AC-LOCAL2** — Picker output in local mode is byte-identical in shape to remote mode: same recency ordering, same `[active <age>]`/`[idle]` annotations, `[new project]` always last, allowlist + duplicate-name guards still applied.
+- [ ] **AC-LOCAL3** — `CLAUDEHOME_LOCAL=0` forces the remote-SSH path even when running on the mini (loopback test). `CLAUDEHOME_LOCAL=1` forces local mode even when `CLAUDEHOME_HOST` doesn't auto-resolve to local — manual override.
+
 ## Assumptions Exposed & Resolved
 
 | Assumption | Challenge | Resolution |
