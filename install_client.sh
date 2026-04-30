@@ -161,7 +161,7 @@ else
   PEERS=$(_tailscale_peers)
   if [[ -n "$PEERS" ]]; then
     echo "Tailscale peers (pick one):"
-    echo "$PEERS" | sed 's/^/  /'
+    echo "  ${PEERS//$'\n'/$'\n  '}"
   fi
   read -r -p "Enter Mac mini Tailscale hostname: " CHOSEN_HOST
   if [[ -z "$CHOSEN_HOST" ]]; then

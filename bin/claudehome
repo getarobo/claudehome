@@ -154,6 +154,7 @@ is_local_target "$HOST" && LOCAL_MODE=1
 # `~/` to $HOME up front. Remote mode leaves PROJECTS_DIR literal — the
 # remote bash -c context expands `~` itself.
 LOCAL_DIR="$PROJECTS_DIR"
+# shellcheck disable=SC2088 # The '~' here is a literal pattern in `case`, not a tilde to expand.
 case "$PROJECTS_DIR" in
   '~')   LOCAL_DIR="$HOME" ;;
   '~/'*) LOCAL_DIR="${HOME}/${PROJECTS_DIR#\~/}" ;;
