@@ -13,7 +13,7 @@ Usage: claudehome
   shows tmux session state for each, and attaches via SSH over Tailscale.
   Sessions are named claudehome-<project> and outlive any claude process.
 
-  The first picker row is [new project] — pick it to create a fresh
+  The last picker row is [new project] — pick it to create a fresh
   directory on the Mac mini and start a session there. Names are validated
   against the same allowlist applied to env vars; duplicates are refused.
 
