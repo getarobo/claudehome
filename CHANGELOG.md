@@ -5,6 +5,15 @@ All notable changes to `claudehome` are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses 4-part versioning: `MAJOR.MINOR.BUILD.REVISION`.
 
+## [1.0.2.1] - 2026-04-30
+
+### Documentation
+- **README iPhone section.** Replaced the placeholder with the real-world path: Tailscale iOS app, an SSH client (Termius free tier recommended; Blink as paid alternative; iSH explicitly the wrong tool), key generation/authorization, and `install_server.sh` on the mini so SSH'ing in and typing `claudehome` opens the picker locally.
+
+### Build
+- **Shellcheck CI.** GitHub Actions workflow at `.github/workflows/shellcheck.yml` runs `shellcheck` against `bin/claudehome`, `install_client.sh`, and `install_server.sh` on every push to `main` and on PRs.
+- Fixed two findings so the first run goes green: SC2088 `disable` on the `case '~/'*` glob pattern in `bin/claudehome` (false positive — literal pattern in `case`, not a tilde expansion); replaced `echo "$PEERS" | sed 's/^/  /'` in `install_client.sh` with bash parameter expansion `"  ${PEERS//$'\n'/$'\n  '}"` per SC2001.
+
 ## [1.0.2.0] - 2026-04-30
 
 ### Added
