@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# install.sh — install claudehome Mac client and run first-time setup wizard.
+# install_client.sh — install claudehome Mac client and run first-time setup wizard.
 #   Default target: ~/.local/bin (no sudo).
-#   Override:       ./install.sh --system   (uses sudo to target /usr/local/bin)
+#   Override:       ./install_client.sh --system   (uses sudo to target /usr/local/bin)
 #
 # Re-running this script is safe: prompts are skipped for values already saved
 # in ~/.claudehomerc or set in the environment.
@@ -30,7 +30,7 @@ for arg in "$@"; do
   case "$arg" in
     --system) SYSTEM=1 ;;
     -h|--help)
-      echo "Usage: ./install.sh [--system]"
+      echo "Usage: ./install_client.sh [--system]"
       echo "  --system   Install to /usr/local/bin (requires sudo)"
       exit 0
       ;;
@@ -95,10 +95,6 @@ _rc_set() {
   fi
 }
 
-_ssh_ok() {
-  ssh -o BatchMode=yes -o ConnectTimeout=5 "${1}@${2}" echo ok >/dev/null 2>&1
-}
-
 _tailscale_peers() {
   "$TAILSCALE" status 2>/dev/null \
     | awk 'NR>1 { print $2 }' \
@@ -119,14 +115,14 @@ if ! command -v tailscale >/dev/null 2>&1; then
     echo "install: Tailscale not found."
     echo "  1. Download and install: https://tailscale.com/download"
     echo "  2. Log in to the same Tailscale account you use on the Mac mini."
-    echo "  3. Re-run: ./install.sh"
+    echo "  3. Re-run: ./install_client.sh"
     open "https://tailscale.com/download" 2>/dev/null || true
     exit 0
   fi
 fi
 if ! "$TAILSCALE" status >/dev/null 2>&1; then
   echo "install: Tailscale is installed but not logged in or not running."
-  echo "  Open the Tailscale menu bar app and log in, then re-run: ./install.sh"
+  echo "  Open the Tailscale menu bar app and log in, then re-run: ./install_client.sh"
   exit 0
 fi
 echo "install: Tailscale is running. ✓"
@@ -147,7 +143,7 @@ done
 # ── Step 4: init config file ─────────────────────────────────────────────────
 if [[ ! -f "$RC" ]]; then
   cat > "$RC" <<'EOF'
-# claudehome config — written by install.sh
+# claudehome config — written by install_client.sh
 # Environment variables take precedence over this file.
 EOF
   echo "install: created ${RC}"
@@ -188,40 +184,7 @@ else
   echo "install: saved CLAUDEHOME_USER=${CHOSEN_USER}"
 fi
 
-# ── Step 7: SSH key ──────────────────────────────────────────────────────────
-echo ""
-echo "── SSH key setup ───────────────────────────────────────────────────────────"
-KEY="${HOME}/.ssh/id_ed25519"
-if [[ ! -f "$KEY" ]]; then
-  echo "install: no SSH key found. Generating ~/.ssh/id_ed25519…"
-  mkdir -p "${HOME}/.ssh"
-  chmod 700 "${HOME}/.ssh"
-  ssh-keygen -t ed25519 -f "$KEY" -N "" -C "$(hostname -s)"
-  echo "install: key generated."
-fi
-
-if _ssh_ok "$CHOSEN_USER" "$CHOSEN_HOST"; then
-  echo "install: SSH access to ${CHOSEN_USER}@${CHOSEN_HOST} confirmed. ✓"
-else
-  echo "install: SSH key not yet authorized on ${CHOSEN_HOST}. Copying…"
-  if command -v ssh-copy-id >/dev/null 2>&1; then
-    ssh-copy-id "${CHOSEN_USER}@${CHOSEN_HOST}"
-  else
-    PUB=$(cat "${KEY}.pub")
-    # shellcheck disable=SC2029
-    ssh "${CHOSEN_USER}@${CHOSEN_HOST}" \
-      "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '${PUB}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-  fi
-  if _ssh_ok "$CHOSEN_USER" "$CHOSEN_HOST"; then
-    echo "install: SSH access confirmed. ✓"
-  else
-    echo "install: SSH still failing. Make sure Remote Login is enabled on the Mac mini:" >&2
-    echo "  System Settings → General → Sharing → Remote Login: on" >&2
-    exit 1
-  fi
-fi
-
-# ── Step 8: fzf (optional) ───────────────────────────────────────────────────
+# ── Step 7: fzf (optional) ───────────────────────────────────────────────────
 echo ""
 echo "── Optional: fzf (arrow-key picker) ───────────────────────────────────────"
 if command -v fzf >/dev/null 2>&1; then
@@ -239,13 +202,33 @@ fi
 echo ""
 if "$LINK" --help >/dev/null 2>&1; then
   echo "────────────────────────────────────────────────────────────────────────────"
-  echo "claudehome installed successfully."
+  echo "claudehome installed."
   echo ""
   echo "  Host:    ${CHOSEN_HOST}"
   echo "  User:    ${CHOSEN_USER}"
   echo "  Config:  ${RC}"
   echo ""
-  echo "Run:  claudehome"
+  echo "Next: authorize an SSH key on ${CHOSEN_HOST}."
+  echo ""
+  if [[ -f "${HOME}/.ssh/id_ed25519.pub" ]]; then
+    echo "  Append your public key to ~/.ssh/authorized_keys on the Mac mini"
+    echo "  (will prompt for the Mac account password):"
+    echo ""
+    echo "    ssh-copy-id ${CHOSEN_USER}@${CHOSEN_HOST}"
+  else
+    echo "  Generate an SSH key first (press Enter twice for no passphrase):"
+    echo ""
+    echo "    ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C \"\$(hostname -s)\""
+    echo ""
+    echo "  Then copy it to the Mac mini:"
+    echo ""
+    echo "    ssh-copy-id ${CHOSEN_USER}@${CHOSEN_HOST}"
+  fi
+  echo ""
+  echo "Verify:"
+  echo "  ssh -o BatchMode=yes ${CHOSEN_USER}@${CHOSEN_HOST} echo ok    # must print: ok"
+  echo ""
+  echo "Then run:  claudehome"
 else
   echo "install: smoke test failed — claudehome --help returned non-zero." >&2
   echo "  Make sure ${TARGET_DIR} is in your PATH." >&2

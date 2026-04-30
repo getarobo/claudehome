@@ -26,7 +26,7 @@ point versioning was introduced.
   session-follows-the-user behavior (`-A -D`), and idempotent attach.
 - Windows client (`bin/claudehome.ps1` + `.cmd` shim) at byte-level parity
   with the Mac client.
-- `install.sh` and `install.ps1` setup wizards with config file
+- `install_client.sh` and `install_client.ps1` setup wizards with config file
   (`~/.claudehomerc`), Tailscale + SSH key onboarding, and optional `fzf`.
 - `[new project]` picker option for in-line project creation
   (`mkdir -p` folded into the attach payload, single round-trip preserved).

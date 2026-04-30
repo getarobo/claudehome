@@ -52,10 +52,20 @@ Download from https://tailscale.com/download, open the app, log in to the **same
 
 #### 1c. Authorize your SSH key
 
-From your client, copy your key to the mini using the mini's actual account name:
+From your client, copy your public key to the mini using the mini's actual account name.
 
+**Mac client:**
 ```sh
 ssh-copy-id <mini-user>@<mini-host>
+```
+
+**Windows client** (no `ssh-copy-id` in OpenSSH for Windows — append manually with password auth):
+```powershell
+# Generate a key first if you don't have one (press Enter twice for no passphrase):
+ssh-keygen -t ed25519 -f $HOME\.ssh\id_ed25519 -C $env:COMPUTERNAME
+
+$pub = (Get-Content $HOME\.ssh\id_ed25519.pub -Raw).Trim()
+ssh <mini-user>@<mini-host> "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '$pub' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
 ```
 
 Verify it works without a password prompt:
@@ -128,19 +138,20 @@ brew install --cask tailscale
 # Clone and install
 git clone git@github.com:getarobo/claudehome.git ~/projects/claudehome
 cd ~/projects/claudehome
-./install.sh
+./install_client.sh
 ```
 
 The installer wizard handles the rest:
 
 - Checks Tailscale is running (links to download if not)
 - Prompts for your mini's hostname and SSH username
-- Generates an SSH key if you don't have one, then copies it to the mini
 - Installs `fzf` via Homebrew if available (enables arrow-key picker)
 - Appends `~/.local/bin` to your PATH in `~/.zshrc` if needed
 - Saves config to `~/.claudehomerc`
 
-Re-running `./install.sh` is safe — prompts are skipped for values already configured.
+The wizard does **not** generate or copy your SSH key. After install, follow §1c above to authorize your key on the mini, then verify with `ssh -o BatchMode=yes <mini-user>@<mini-host> echo ok`. The wizard prints the exact command to run.
+
+Re-running `./install_client.sh` is safe — prompts are skipped for values already configured.
 
 ---
 
@@ -159,23 +170,24 @@ Then clone and install:
 ```powershell
 git clone git@github.com:getarobo/claudehome.git $HOME\projects\claudehome
 Set-Location $HOME\projects\claudehome
-.\install.ps1
+.\install_client.ps1
 ```
 
 The installer wizard handles the rest:
 
 - Checks Tailscale is running (links to download if not)
 - Prompts for your mini's hostname and SSH username
-- Generates an SSH key if you don't have one, then copies it to the mini
 - Installs `fzf` via winget if available (enables arrow-key picker)
 - Adds `<repo>\bin` to your user PATH
 - Saves config to `~/.claudehomerc`
 
+The wizard does **not** generate or copy your SSH key — Windows OpenSSH lacks `ssh-copy-id` and key handling is brittle to automate. After install, follow §1c above to authorize your key on the mini, then verify with `ssh -o BatchMode=yes <mini-user>@<mini-host> echo ok`. The wizard prints the exact command to run.
+
 Open a **new** PowerShell window after install, then run `claudehome`.
 
-Re-running `.\install.ps1` is safe — prompts are skipped for values already configured.
+Re-running `.\install_client.ps1` is safe — prompts are skipped for values already configured.
 
-> **Note:** If you downloaded the repo as a ZIP instead of cloning, run `Unblock-File .\install.ps1` before executing. `git clone` doesn't require this.
+> **Note:** If you downloaded the repo as a ZIP instead of cloning, run `Unblock-File .\install_client.ps1` before executing. `git clone` doesn't require this.
 
 **Terminal tip:** Use WezTerm or Windows Terminal for best rendering. The `.cmd` shim also works from `cmd.exe`.
 
@@ -297,7 +309,7 @@ Project directories with spaces or shell-special characters are rejected with a 
 ## Troubleshooting
 
 **`CLAUDEHOME_HOST is not set`**
-Run the installer (`./install.sh` or `.\install.ps1`) to configure, or set the variable manually:
+Run the installer (`./install_client.sh` or `.\install_client.ps1`) to configure, or set the variable manually:
 ```sh
 export CLAUDEHOME_HOST=<mini-host>    # Mac/Linux
 $env:CLAUDEHOME_HOST = '<mini-host>'  # Windows

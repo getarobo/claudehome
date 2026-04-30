@@ -14,11 +14,11 @@ Each client (`bin/claudehome` on Mac, `bin/claudehome.ps1` on Windows) loads con
 
 - **Main script (Mac):** `bin/claudehome` (bash, ~150 lines).
 - **Main script (Windows):** `bin/claudehome.ps1` (pwsh 7+, ~150 lines) + `bin/claudehome.cmd` shim.
-- **Installer (Mac):** `install.sh` — symlinks CLI, runs setup wizard, writes `~/.claudehomerc`.
-- **Installer (Windows):** `install.ps1` — adds `<repo>\bin` to user PATH, runs setup wizard, writes `~/.claudehomerc`.
+- **Installer (Mac):** `install_client.sh` — symlinks CLI, runs setup wizard, writes `~/.claudehomerc`.
+- **Installer (Windows):** `install_client.ps1` — adds `<repo>\bin` to user PATH, runs setup wizard, writes `~/.claudehomerc`.
 - **Config file:** `~/.claudehomerc` — KEY=VALUE format, written by installers. Env vars take precedence.
-- **Lint (Mac):** `shellcheck bin/claudehome install.sh`.
-- **Lint (Windows):** `Invoke-ScriptAnalyzer bin/claudehome.ps1, install.ps1`.
+- **Lint (Mac):** `shellcheck bin/claudehome install_client.sh`.
+- **Lint (Windows):** `Invoke-ScriptAnalyzer bin/claudehome.ps1, install_client.ps1`.
 - **Smoke test:** `bin/claudehome --help` / `bin/claudehome.ps1 --help` must exit 0 and print usage.
 - **Full integration** requires a real Tailscale-reachable Mac mini with `tmux` and `claude` installed. The requires-mac-mini acceptance criteria are AC1–AC8 and AC11 in `.omc/specs/deep-interview-claudehome-v1.md`; PC-specific criteria AC-PC1–AC-PC8 are in `.omc/specs/deep-interview-claudehome-pc-v1.md`.
 
@@ -31,7 +31,7 @@ The following are explicit non-goals — **do not add them** without updating th
 - Daemons, background workers, persistent state files, or anything outside plain tmux
 - iPhone / web clients
 - Packaging (npm, Homebrew formula, Docker, systemd, PowerShell Gallery, winget manifest)
-- `install.ps1 --system` / machine-wide install on Windows
+- `install_client.ps1 --system` / machine-wide install on Windows
 - PowerShell 5.1 support (pwsh 7+ only for the Windows client)
 - Server-side bootstrap (mini setup remains manual per README)
 
@@ -46,7 +46,7 @@ iPhone client is planned but out of scope for this pass.
 
 ## Windows PC — post-install verification
 
-After running `.\install.ps1`, open a **new** pwsh window and run the following checklist (AC-PC1–AC-PC8 from the spec):
+After running `.\install_client.ps1`, open a **new** pwsh window and run the following checklist (AC-PC1–AC-PC8 from the spec):
 
 - **AC-PC1** — `claudehome` by bare name opens the picker and attaches successfully.
 - **AC-PC2** — `claudehome --help` and `claudehome -h` print the usage text with the env var table.

@@ -22,7 +22,7 @@ Environment variables (or set in ~/.claudehomerc):
   CLAUDEHOME_USER          SSH user on the Mac mini             (default: $USER)
   CLAUDEHOME_PROJECTS_DIR  Projects root on the Mac mini        (default: ~/projects/claudecode)
 
-Config file: ~/.claudehomerc — written by install.sh. Format: KEY=VALUE, one per line.
+Config file: ~/.claudehomerc — written by install_client.sh. Format: KEY=VALUE, one per line.
 Environment variables take precedence over values in the config file.
 
 Detach from an attached session with tmux's standard binding:
@@ -59,7 +59,7 @@ PROJECTS_DIR="${CLAUDEHOME_PROJECTS_DIR:-~/projects/claudecode}"
 
 if [[ -z "$HOST" ]]; then
   echo "claudehome: CLAUDEHOME_HOST is not set." >&2
-  echo "  Run ./install.sh to configure, or: export CLAUDEHOME_HOST=<tailscale-hostname>" >&2
+  echo "  Run ./install_client.sh to configure, or: export CLAUDEHOME_HOST=<tailscale-hostname>" >&2
   exit 1
 fi
 

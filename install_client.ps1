@@ -1,5 +1,5 @@
 #Requires -Version 7.0
-# install.ps1 — install claudehome PC client and run first-time setup wizard.
+# install_client.ps1 — install claudehome PC client and run first-time setup wizard.
 #
 # Re-running this script is safe: prompts are skipped for values already saved
 # in ~/.claudehomerc or set in the environment.
@@ -75,13 +75,6 @@ function Set-RcValue([string]$key, [string]$val) {
     }
 }
 
-function Test-SshOk([string]$user, [string]$sshHost) {
-    try {
-        $result = & ssh.exe -o BatchMode=yes -o ConnectTimeout=5 "$user@$sshHost" echo ok 2>$null
-        $LASTEXITCODE -eq 0 -and $result -eq 'ok'
-    } catch { $false }
-}
-
 # ── Step 4: Tailscale check ───────────────────────────────────────────────────
 Write-Step "Checking Tailscale"
 $tailscaleCmd = Get-Command tailscale.exe -ErrorAction SilentlyContinue
@@ -89,14 +82,14 @@ if (-not $tailscaleCmd) {
     Write-Ok "Tailscale not found."
     Write-Host "  1. Download and install: https://tailscale.com/download"
     Write-Host "  2. Log in to the same Tailscale account you use on the Mac mini."
-    Write-Host "  3. Re-run: .\install.ps1"
+    Write-Host "  3. Re-run: .\install_client.ps1"
     Start-Process "https://tailscale.com/download"
     exit 0
 }
 & tailscale.exe status 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Ok "Tailscale is installed but not logged in or not running."
-    Write-Host "  Open the Tailscale system-tray app and log in, then re-run: .\install.ps1"
+    Write-Host "  Open the Tailscale system-tray app and log in, then re-run: .\install_client.ps1"
     exit 0
 }
 Write-Ok "Tailscale is running. ✓"
@@ -104,7 +97,7 @@ Write-Ok "Tailscale is running. ✓"
 # ── Step 5: init config file ──────────────────────────────────────────────────
 if (-not (Test-Path -LiteralPath $rcPath)) {
     Set-Content -LiteralPath $rcPath -Value `
-        "# claudehome config -- written by install.ps1`n# Environment variables take precedence over this file.`n" `
+        "# claudehome config -- written by install_client.ps1`n# Environment variables take precedence over this file.`n" `
         -Encoding UTF8
     Write-Ok "Created $rcPath"
 }
@@ -157,52 +150,7 @@ foreach ($varName in @('CLAUDEHOME_HOST', 'CLAUDEHOME_USER', 'CLAUDEHOME_PROJECT
     }
 }
 
-# ── Step 8: SSH key ───────────────────────────────────────────────────────────
-Write-Step "SSH key setup"
-$keyPath = Join-Path $HOME '.ssh' 'id_ed25519'
-$pubPath = "$keyPath.pub"
-if (-not (Test-Path -LiteralPath $keyPath)) {
-    Write-Ok "No SSH key at $keyPath. Generating..."
-    $sshDir = Join-Path $HOME '.ssh'
-    if (-not (Test-Path $sshDir)) { New-Item -ItemType Directory -Path $sshDir | Out-Null }
-    & ssh-keygen.exe -t ed25519 -f $keyPath -N '""' -C $env:COMPUTERNAME
-    Write-Ok "Key generated."
-}
-
-$sshAttempts = 0
-while (-not (Test-SshOk $chosenUser $chosenHost)) {
-    $sshAttempts++
-    if ($sshAttempts -gt 3) {
-        Write-Err "SSH still failing after 3 attempts. Check Remote Login is on:"
-        Write-Host "  System Settings → General → Sharing → Remote Login: on"
-        exit 1
-    }
-    Write-Ok "SSH key not yet authorized on $chosenHost. Copying..."
-    $pub = (Get-Content -LiteralPath $pubPath -Raw).Trim()
-    $sshCopyId = Get-Command ssh-copy-id.exe -ErrorAction SilentlyContinue
-    $copyOk = $false
-    if ($sshCopyId) {
-        & ssh-copy-id.exe "$chosenUser@$chosenHost"
-        $copyOk = ($LASTEXITCODE -eq 0)
-    } else {
-        & ssh.exe "$chosenUser@$chosenHost" `
-            "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '$pub' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-        $copyOk = ($LASTEXITCODE -eq 0)
-    }
-    if (-not $copyOk) {
-        Write-Host ""
-        Write-Host "  Could not connect. The username '$chosenUser' may be wrong."
-        $newUser = Read-Host "  Re-enter Mac mini SSH username (or press Enter to keep '$chosenUser')"
-        if (-not [string]::IsNullOrWhiteSpace($newUser)) {
-            $chosenUser = $newUser.Trim()
-            Set-RcValue 'CLAUDEHOME_USER' $chosenUser
-            Write-Ok "Updated CLAUDEHOME_USER=$chosenUser"
-        }
-    }
-}
-Write-Ok "SSH access to $chosenUser@$chosenHost confirmed. ✓"
-
-# ── Step 9: fzf (optional) ────────────────────────────────────────────────────
+# ── Step 8: fzf (optional) ────────────────────────────────────────────────────
 Write-Step "Optional: fzf (arrow-key picker)"
 if (Get-Command fzf.exe -ErrorAction SilentlyContinue) {
     Write-Ok "fzf already installed. ✓"
@@ -228,10 +176,33 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "────────────────────────────────────────────────────────────────────────────"
-Write-Host "claudehome installed successfully."
+Write-Host "claudehome installed."
 Write-Host ""
 Write-Host "  Host:    $chosenHost"
 Write-Host "  User:    $chosenUser"
 Write-Host "  Config:  $rcPath"
 Write-Host ""
-Write-Host "Open a NEW shell and run:  claudehome"
+Write-Host "Next: authorize an SSH key on $chosenHost."
+Write-Host ""
+
+$pubPath = Join-Path $HOME '.ssh' 'id_ed25519.pub'
+if (Test-Path -LiteralPath $pubPath) {
+    Write-Host "  Append your public key to ~/.ssh/authorized_keys on the Mac mini"
+    Write-Host "  (will prompt for the Mac account password):"
+    Write-Host ""
+    Write-Host "    `$pub = (Get-Content `$HOME\.ssh\id_ed25519.pub -Raw).Trim()"
+    Write-Host "    ssh $chosenUser@$chosenHost `"mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '`$pub' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`""
+} else {
+    Write-Host "  No SSH key found at $pubPath. Generate one first"
+    Write-Host "  (press Enter twice for no passphrase):"
+    Write-Host ""
+    Write-Host "    ssh-keygen -t ed25519 -f `$HOME\.ssh\id_ed25519 -C `$env:COMPUTERNAME"
+    Write-Host ""
+    Write-Host "  Then append the .pub to ~/.ssh/authorized_keys on $chosenHost."
+}
+
+Write-Host ""
+Write-Host "Verify:"
+Write-Host "  ssh -o BatchMode=yes $chosenUser@$chosenHost echo ok    # must print: ok"
+Write-Host ""
+Write-Host "Then open a NEW shell and run:  claudehome"

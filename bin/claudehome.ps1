@@ -24,7 +24,7 @@ Environment variables (or set in ~/.claudehomerc):
   CLAUDEHOME_USER          SSH user on the Mac mini             (default: $env:USERNAME)
   CLAUDEHOME_PROJECTS_DIR  Projects root on the Mac mini        (default: ~/projects/claudecode)
 
-Config file: ~/.claudehomerc — written by install.ps1. Format: KEY=VALUE, one per line.
+Config file: ~/.claudehomerc — written by install_client.ps1. Format: KEY=VALUE, one per line.
 Environment variables take precedence over values in the config file.
 
 Detach from an attached session with tmux's standard binding:
@@ -68,7 +68,7 @@ $rxProj = '^[a-zA-Z0-9._-]+$'
 function Die([string]$msg) { [Console]::Error.WriteLine($msg); exit 1 }
 
 if (-not $HostName) {
-    Die "claudehome: CLAUDEHOME_HOST is not set.`n  Run .\install.ps1 to configure, or: `$env:CLAUDEHOME_HOST = '<tailscale-hostname>'"
+    Die "claudehome: CLAUDEHOME_HOST is not set.`n  Run .\install_client.ps1 to configure, or: `$env:CLAUDEHOME_HOST = '<tailscale-hostname>'"
 }
 if ($HostName    -notmatch $rxHost) { Die "claudehome: CLAUDEHOME_HOST='$HostName' has unsupported characters.`n  Allowed: letters, digits, '.', '_', '-'" }
 if ($RemoteUser  -notmatch $rxUser) { Die "claudehome: CLAUDEHOME_USER='$RemoteUser' has unsupported characters.`n  Allowed: letters, digits, '.', '_', '-'" }
