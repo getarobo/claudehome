@@ -104,11 +104,13 @@ Open the admin console at https://login.tailscale.com/admin/machines — or clic
 - **DNS tab → toggle MagicDNS on** so devices can reach each other by name instead of IP. (One-time tailnet setting; applies to clients added later.)
 
 **hostname**
+
 ![Tailscale admin console with the mini renamed (highlighted)](docs/images/2_tailscale_servername.jpg)
 
 Clients added in §3 will also appear here once they join the tailnet — rename them too if you want clean names, but only the mini's name is load-bearing.
 
 **SSH username**
+
 ![Terminal showing the mini's username (highlighted)](docs/images/3_ssh_username.jpg)
 
 Your clients will SSH in as `<mini-user>@<mini-host>` — e.g., `genehan@gene-mini`. `<mini-user>` is the mini's account name (the highlighted part of the prompt above, also `echo $USER` at the mini's Terminal); `<mini-host>` is whatever you name the device in the Tailscale admin console (the prompt's hostname is the local macOS one, not the Tailscale one).
