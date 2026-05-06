@@ -12,8 +12,8 @@ Each client (`bin/claudehome` on Mac, `bin/claudehome.ps1` on Windows) loads con
 
 ## Development
 
-- **Main script (Mac):** `bin/claudehome` (bash, ~150 lines).
-- **Main script (Windows):** `bin/claudehome.ps1` (pwsh 7+, ~150 lines) + `bin/claudehome.cmd` shim.
+- **Main script (Mac):** `bin/claudehome` (bash, ~310 lines).
+- **Main script (Windows):** `bin/claudehome.ps1` (pwsh 7+, ~228 lines) + `bin/claudehome.cmd` shim.
 - **Installer (Mac client):** `install_client.sh` — symlinks CLI, runs setup wizard (Tailscale check, host/user prompts, optional fzf), writes `~/.claudehomerc`.
 - **Installer (Mac server / local mode):** `install_server.sh` — symlinks CLI on the mini itself for local-mode use (skip Tailscale check, skip ssh-copy-id guidance, write `CLAUDEHOME_LOCAL=1`). Used when SSH'd into the mini from another device (iPhone Termius/Blink) and you want `claudehome` to run the picker locally with no loopback SSH. Does **not** install tmux, claude, or Tailscale — those stay manual per README §1.
 - **Installer (Windows):** `install_client.ps1` — adds `<repo>\bin` to user PATH, runs setup wizard, writes `~/.claudehomerc`.
@@ -21,7 +21,7 @@ Each client (`bin/claudehome` on Mac, `bin/claudehome.ps1` on Windows) loads con
 - **Lint (Mac):** `shellcheck bin/claudehome install_client.sh`.
 - **Lint (Windows):** `Invoke-ScriptAnalyzer bin/claudehome.ps1, install_client.ps1`.
 - **Smoke test:** `bin/claudehome --help` / `bin/claudehome.ps1 --help` must exit 0 and print usage.
-- **Full integration** requires a real Tailscale-reachable Mac mini with `tmux` and `claude` installed. The requires-mac-mini acceptance criteria are AC1–AC8 and AC11 in `.omc/specs/deep-interview-claudehome-v1.md`; PC-specific criteria AC-PC1–AC-PC8 are in `.omc/specs/deep-interview-claudehome-pc-v1.md`.
+- **Full integration** requires a real Tailscale-reachable Mac mini with `tmux` and `claude` installed. The requires-mac-mini acceptance criteria are AC1–AC8 and AC11 in `.omc/specs/deep-interview-claudehome-v1.md`; PC-specific criteria AC-PC1–AC-PC9 are in `.omc/specs/deep-interview-claudehome-pc-v1.md`.
 
 ## Scope guardrails
 
@@ -32,7 +32,7 @@ The following are explicit non-goals — **do not add them** without updating th
 - Daemons, background workers, persistent state files, or anything outside plain tmux
 - iPhone / web clients
 - Packaging (npm, Homebrew formula, Docker, systemd, PowerShell Gallery, winget manifest)
-- `install_client.ps1 --system` / machine-wide install on Windows
+- `install_client.ps1 --system` / machine-wide install on Windows. (The bash `install_client.sh` and `install_server.sh` do support `--system` — the non-goal is PowerShell-specific.)
 - PowerShell 5.1 support (pwsh 7+ only for the Windows client)
 - Server-side bootstrap (mini setup remains manual per README)
 
@@ -40,14 +40,14 @@ iPhone access is solved via any iOS SSH app (Termius, Blink) + Tailscale + the m
 
 ## Key docs
 
-- `.omc/specs/deep-interview-claudehome-v1.md` — v1 Mac client spec, 12 acceptance criteria
+- `.omc/specs/deep-interview-claudehome-v1.md` — v1 Mac client spec, AC1–AC18 + AC-LOCAL1–3
 - `.omc/plans/claudehome-v1-plan.md` — v1 Mac implementation plan with ADR, Architect + Critic consensus addendum
-- `.omc/specs/deep-interview-claudehome-pc-v1.md` — v1 PC (PowerShell 7+) client spec, 8 PC-specific ACs
+- `.omc/specs/deep-interview-claudehome-pc-v1.md` — v1 PC (PowerShell 7+) client spec, AC-PC1–AC-PC9
 - `.omc/plans/claudehome-pc-v1-plan.md` — v1 PC implementation plan, Architect + Critic consensus APPROVED
 
 ## Windows PC — post-install verification
 
-After running `.\install_client.ps1`, open a **new** pwsh window and run the following checklist (AC-PC1–AC-PC8 from the spec):
+After running `.\install_client.ps1`, open a **new** pwsh window and run the following checklist (AC-PC1–AC-PC9 from the spec):
 
 - **AC-PC1** — `claudehome` by bare name opens the picker and attaches successfully.
 - **AC-PC2** — `claudehome --help` and `claudehome -h` print the usage text with the env var table.
