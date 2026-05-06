@@ -75,7 +75,7 @@ which claude tmux   # both paths should print
 
 **Create the projects root:**
 ```sh
-mkdir -p ~/projects/claudecode
+mkdir -p ~/projects/claudehome-projects
 ```
 
 **Log Claude Code in (one-time OAuth):**
@@ -225,7 +225,7 @@ If it prompts for a password instead of returning `ok`, the key wasn't authorize
 claudehome
 ```
 
-A picker shows every project under `~/projects/claudecode` on the mini, annotated with session state. Active sessions are ordered by recency (most-recently-used at top); idle projects sit below them alphabetically; the `[new project]` option is always the last row:
+A picker shows every project under `~/projects/claudehome-projects` on the mini, annotated with session state. Active sessions are ordered by recency (most-recently-used at top); idle projects sit below them alphabetically; the `[new project]` option is always the last row:
 
 ```
 ▸ my-api-project  [active 2h ago]
@@ -276,7 +276,7 @@ After this, mouse wheel scrolls directly inside tmux without needing scroll mode
 - Username: your `CLAUDEHOME_USER` value
 - SSH Private Key: `~/.ssh/id_ed25519`
 
-Connect, then navigate to `projects/claudecode/<project>/`.
+Connect, then navigate to `projects/claudehome-projects/<project>/`.
 
 **WinSCP (Windows)** — *New Site* → File protocol: **SFTP**:
 
@@ -300,14 +300,14 @@ Config is read from `~/.claudehomerc` (written by the installer), then overridde
 # claudehome config
 CLAUDEHOME_HOST=my-mini
 CLAUDEHOME_USER=myuser
-# CLAUDEHOME_PROJECTS_DIR=~/projects/claudecode
+# CLAUDEHOME_PROJECTS_DIR=~/projects/claudehome-projects
 ```
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `CLAUDEHOME_HOST` | none — required | Tailscale hostname of the Mac mini |
 | `CLAUDEHOME_USER` | local `$USER` / `$env:USERNAME` | SSH username on the Mac mini |
-| `CLAUDEHOME_PROJECTS_DIR` | `~/projects/claudecode` | Projects root on the Mac mini |
+| `CLAUDEHOME_PROJECTS_DIR` | `~/projects/claudehome-projects` | Projects root on the Mac mini |
 
 Set `CLAUDEHOME_PROJECTS_DIR` with single quotes to prevent local tilde expansion:
 ```sh

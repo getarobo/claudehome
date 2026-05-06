@@ -24,7 +24,7 @@ Usage: claudehome
 Environment variables (or set in ~/.claudehomerc):
   CLAUDEHOME_HOST          Tailscale hostname of the Mac mini   (required)
   CLAUDEHOME_USER          SSH user on the Mac mini             (default: $USER)
-  CLAUDEHOME_PROJECTS_DIR  Projects root on the Mac mini        (default: ~/projects/claudecode)
+  CLAUDEHOME_PROJECTS_DIR  Projects root on the Mac mini        (default: ~/projects/claudehome-projects)
   CLAUDEHOME_LOCAL         Force local mode (1) or remote (0)   (default: auto-detect)
 
 Config file: ~/.claudehomerc — written by install_client.sh. Format: KEY=VALUE, one per line.
@@ -60,7 +60,7 @@ fi
 # ---- config ----
 HOST="${CLAUDEHOME_HOST:-}"
 REMOTE_USER="${CLAUDEHOME_USER:-$USER}"
-PROJECTS_DIR="${CLAUDEHOME_PROJECTS_DIR:-~/projects/claudecode}"
+PROJECTS_DIR="${CLAUDEHOME_PROJECTS_DIR:-~/projects/claudehome-projects}"
 
 if [[ -z "$HOST" ]]; then
   echo "claudehome: CLAUDEHOME_HOST is not set." >&2

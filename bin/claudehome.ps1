@@ -22,7 +22,7 @@ Usage: claudehome
 Environment variables (or set in ~/.claudehomerc):
   CLAUDEHOME_HOST          Tailscale hostname of the Mac mini   (required)
   CLAUDEHOME_USER          SSH user on the Mac mini             (default: $env:USERNAME)
-  CLAUDEHOME_PROJECTS_DIR  Projects root on the Mac mini        (default: ~/projects/claudecode)
+  CLAUDEHOME_PROJECTS_DIR  Projects root on the Mac mini        (default: ~/projects/claudehome-projects)
 
 Config file: ~/.claudehomerc — written by install_client.ps1. Format: KEY=VALUE, one per line.
 Environment variables take precedence over values in the config file.
@@ -55,7 +55,7 @@ if (Test-Path -LiteralPath $rcPath) {
 # ---- config ----
 $HostName    = if ($env:CLAUDEHOME_HOST)          { $env:CLAUDEHOME_HOST }          else { $null }
 $RemoteUser  = if ($env:CLAUDEHOME_USER)          { $env:CLAUDEHOME_USER }          else { $env:USERNAME }
-$ProjectsDir = if ($env:CLAUDEHOME_PROJECTS_DIR)  { $env:CLAUDEHOME_PROJECTS_DIR }  else { '~/projects/claudecode' }
+$ProjectsDir = if ($env:CLAUDEHOME_PROJECTS_DIR)  { $env:CLAUDEHOME_PROJECTS_DIR }  else { '~/projects/claudehome-projects' }
 
 # ---- validate config ----
 # Allowlist-before-interpolation: all values are regex-validated before any string
