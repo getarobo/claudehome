@@ -43,6 +43,8 @@ Run at the mini directly (Terminal.app):
 
 1. **Install Tailscale.** Download from https://tailscale.com/download, open the app, log in to the tailnet you'll share with your clients. (Naming the device + enabling MagicDNS is §2.)
 
+   Your clients will SSH in as `<mini-user>@<mini-host>` — e.g., `genehan@gene-mini`. `<mini-user>` is the mini's account name (`echo $USER` at the mini's Terminal); `<mini-host>` is whatever you name the device in §2.
+
 2. **Enable SSH.** System Settings → General → Sharing → **Remote Login: on**.
 
 3. **Install tmux.**
