@@ -133,6 +133,15 @@ When SSH'd into the mini from another device (iPhone Termius/Blink, etc.), runni
 - [ ] **AC-LOCAL2** — Picker output in local mode is byte-identical in shape to remote mode: same recency ordering, same `[active <age>]`/`[idle]` annotations, `[new project]` always last, allowlist + duplicate-name guards still applied.
 - [ ] **AC-LOCAL3** — `CLAUDEHOME_LOCAL=0` forces the remote-SSH path even when running on the mini (loopback test). `CLAUDEHOME_LOCAL=1` forces local mode even when `CLAUDEHOME_HOST` doesn't auto-resolve to local — manual override.
 
+### Amendment 2026-05-06: config file (`~/.claudehomerc`)
+
+Since v1.0.1.0 the install scripts (`install_client.sh`, `install_client.ps1`, `install_server.sh`) write a `KEY=VALUE` config file at `~/.claudehomerc` and the clients parse it on startup. This supersedes the original "env vars only, no config file in v1" wording in §Configuration (L65), the "Config file, YAML/TOML settings" non-goal (L101), the "No config files" trade-off line (L144), and the "no config file" clause inside AC10. Amended rules:
+
+- `~/.claudehomerc` is the **only** allowed config file (plain `KEY=VALUE` per line, `#` comments). Any other format (YAML, TOML, JSON, INI) remains a non-goal.
+- Environment variables take precedence over the rc file. Install scripts skip prompts for keys that are already set in the rc or in env.
+- **AC10 is amended to:** "macmini has no claudehome-side daemon or persistent state. The only artifacts on macmini are tmux sessions, any directories under the projects root, and (when `install_server.sh` has been run for local-mode) the mini's own `~/.claudehomerc` written by the installer."
+- The "future config-file layer is an additive change, not a rewrite" guidance at L69 is now satisfied — the rc file is that additive layer.
+
 ## Assumptions Exposed & Resolved
 
 | Assumption | Challenge | Resolution |

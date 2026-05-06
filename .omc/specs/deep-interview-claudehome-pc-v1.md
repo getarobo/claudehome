@@ -102,6 +102,17 @@ AC1–AC12 from `.omc/specs/deep-interview-claudehome-v1.md` are the PC test man
 - [ ] **AC-PC8** (Shim invocation) — From a `cmd.exe` prompt (not pwsh), typing `claudehome` launches the tool successfully via the `.cmd` shim. This verifies the shim works for non-pwsh shells, not just pwsh.
 - [ ] **AC-PC9** (New-project parity) — All of AC13–AC18 from the parent spec pass identically when invoked from `claudehome.ps1` on Windows: `[new project]` is the last picker row; `Read-Host` prompts `New project name`; empty input exits 0; allowlist + duplicate names trigger retry; a fresh name creates the directory on the mini and attaches the user to a `claude` prompt in it via the same single SSH round-trip; existing projects are ordered by tmux activity descending with idle ones alphabetical below.
 
+### Amendment 2026-05-06: PC client is remote-only; rc file allowed
+
+Two clarifications on the parity language above.
+
+1. **Local-mode exemption.** The Mac v1 spec gained an `AC-LOCAL1–3` amendment for running `claudehome` on the mini itself (no loopback SSH). The PC client does **not** implement this — local mode is Mac-only by design (the Mac mini is always the server; a Windows machine is never the server, so a loopback-from-Windows path has no use case). `AC-LOCAL1–3` explicitly **do not apply** to the PC client. Consequences:
+   - `bin/claudehome.ps1` has no IP-resolution / hostname-intersection logic and no `CLAUDEHOME_LOCAL` env var handling.
+   - **AC-PC2** "same env var table as the Mac version" is loosened: PC `--help` may omit the `CLAUDEHOME_LOCAL` row and the local-mode paragraph that the Mac help carries. Everything else in the env var table must still match.
+   - The "strict behavioral parity" pledge in the Goal section (L25) is scoped to AC1–AC12 + AC13–AC18 (which the PC client honors via AC-PC1–AC-PC9). It does not extend to AC-LOCAL.
+
+2. **Config file (`~/.claudehomerc`).** The Mac v1 spec's 2026-05-06 rc-file amendment applies on PC too. The "Config file on Windows (`.claudehomerc`, TOML, etc.) — env vars only, same as Mac" non-goal at L80 is superseded: `~/.claudehomerc` is allowed (`KEY=VALUE` per line, env vars take precedence, `install_client.ps1` writes it via `[Environment]::SetEnvironmentVariable` for PATH and direct file write for the rc). All other config-file formats (YAML, TOML, JSON, INI) remain non-goals on Windows.
+
 ## Assumptions Exposed & Resolved
 
 | Assumption | Challenge | Resolution |
