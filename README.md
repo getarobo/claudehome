@@ -40,102 +40,99 @@ Three sections, in order:
 
 #### Mac mini (server)
 
-Run all of the following at the mini directly (Terminal.app):
+Run at the mini directly (Terminal.app):
 
-**Install Tailscale** — download from https://tailscale.com/download, open the app, log in to the tailnet you'll share with your clients. (Naming the device + enabling MagicDNS is §2.)
+1. **Install Tailscale.** Download from https://tailscale.com/download, open the app, log in to the tailnet you'll share with your clients. (Naming the device + enabling MagicDNS is §2.)
 
-**Enable SSH** — System Settings → General → Sharing → **Remote Login: on**.
+2. **Enable SSH.** System Settings → General → Sharing → **Remote Login: on**.
 
-**Install tmux:**
-```sh
-brew install tmux
-```
+3. **Install tmux.**
+   ```sh
+   brew install tmux
+   ```
 
-**Install Claude Code** (skip if `claude` is already installed):
-```sh
-curl -fsSL https://claude.ai/install.sh | bash
-```
+4. **Install Claude Code** (skip if `claude` is already installed).
+   ```sh
+   curl -fsSL https://claude.ai/install.sh | bash
+   ```
 
-**Fix the SSH PATH.** macOS SSH sessions load `~/.zshenv` but **not** `~/.zshrc`, so Homebrew-installed tools are invisible to the non-interactive SSH commands `claudehome` issues from clients. Without this step, the client returns `tmux: command not found` on first attach.
+5. **Fix the SSH PATH.** macOS SSH sessions load `~/.zshenv` but **not** `~/.zshrc`, so Homebrew-installed tools are invisible to the non-interactive SSH commands `claudehome` issues from clients. Without this step, the client returns `tmux: command not found` on first attach.
 
-Apple Silicon:
-```sh
-echo 'export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"' >> ~/.zshenv
-```
+   Apple Silicon:
+   ```sh
+   echo 'export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"' >> ~/.zshenv
+   ```
 
-Intel Mac:
-```sh
-echo 'export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"' >> ~/.zshenv
-```
+   Intel Mac:
+   ```sh
+   echo 'export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"' >> ~/.zshenv
+   ```
 
-Verify (in a fresh shell):
-```sh
-which claude tmux   # both paths should print
-```
+   Verify (in a fresh shell):
+   ```sh
+   which claude tmux   # both paths should print
+   ```
 
-**Create the projects root:**
-```sh
-mkdir -p ~/projects/claudehome-projects
-```
+6. **Create the projects root.**
+   ```sh
+   mkdir -p ~/projects/claudehome-projects
+   ```
 
-**Log Claude Code in (one-time OAuth):**
-```sh
-claude
-```
-Claude prints a login URL. Open it in any browser, complete sign-in, paste the code back. Credentials save to `~/.claude/` on the mini and persist across reboots.
+7. **Log Claude Code in (one-time OAuth).**
+   ```sh
+   claude
+   ```
+   Claude prints a login URL. Open it in any browser, complete sign-in, paste the code back. Credentials save to `~/.claude/` on the mini and persist across reboots.
 
 #### Mac client
 
-```sh
-brew install --cask tailscale
-git clone git@github.com:getarobo/claudehome.git ~/projects/claudehome
-cd ~/projects/claudehome
-./install_client.sh
-```
+1. **Install Tailscale.**
+   ```sh
+   brew install --cask tailscale
+   ```
 
-The installer wizard:
+2. **Clone and run the installer.**
+   ```sh
+   git clone git@github.com:getarobo/claudehome.git ~/projects/claudehome
+   cd ~/projects/claudehome
+   ./install_client.sh
+   ```
 
-- Checks Tailscale is running (links to download if not)
-- Prompts for your mini's hostname and SSH username
-- Installs `fzf` via Homebrew if available (enables arrow-key picker)
-- Appends `~/.local/bin` to your PATH in `~/.zshrc` if needed
-- Saves config to `~/.claudehomerc`
+   The installer wizard:
+   - Checks Tailscale is running (links to download if not)
+   - Prompts for your mini's hostname and SSH username
+   - Installs `fzf` via Homebrew if available (enables arrow-key picker)
+   - Appends `~/.local/bin` to your PATH in `~/.zshrc` if needed
+   - Saves config to `~/.claudehomerc`
 
-The wizard does **not** set up your SSH key — that's §3.
-
-Re-running `./install_client.sh` is safe — prompts are skipped for values already configured.
+   The wizard does **not** set up your SSH key — that's §3. Re-running `./install_client.sh` is safe (prompts are skipped for values already configured).
 
 #### Windows client — PowerShell 7+
 
-Install prerequisites first (if not already present):
+1. **Install prerequisites** (if not already present).
+   ```powershell
+   winget install Microsoft.PowerShell    # PowerShell 7
+   winget install Tailscale.Tailscale     # same tailnet as the mini
+   where.exe ssh                          # verify OpenSSH is present (pre-installed on Windows 10 1803+)
+   ```
 
-```powershell
-winget install Microsoft.PowerShell    # PowerShell 7
-winget install Tailscale.Tailscale     # same tailnet as the mini
-where.exe ssh                          # verify OpenSSH is present (pre-installed on Windows 10 1803+)
-```
+2. **Clone and run the installer.**
+   ```powershell
+   git clone git@github.com:getarobo/claudehome.git $HOME\projects\claudehome
+   Set-Location $HOME\projects\claudehome
+   .\install_client.ps1
+   ```
 
-Then clone and install:
+   The installer wizard:
+   - Checks Tailscale is running (links to download if not)
+   - Prompts for your mini's hostname and SSH username
+   - Installs `fzf` via winget if available (enables arrow-key picker)
+   - Adds `<repo>\bin` to your user PATH
+   - Saves config to `~/.claudehomerc`
 
-```powershell
-git clone git@github.com:getarobo/claudehome.git $HOME\projects\claudehome
-Set-Location $HOME\projects\claudehome
-.\install_client.ps1
-```
+   The wizard does **not** set up your SSH key — that's §3.
 
-The installer wizard:
-
-- Checks Tailscale is running (links to download if not)
-- Prompts for your mini's hostname and SSH username
-- Installs `fzf` via winget if available (enables arrow-key picker)
-- Adds `<repo>\bin` to your user PATH
-- Saves config to `~/.claudehomerc`
-
-The wizard does **not** set up your SSH key — that's §3.
-
-Open a **new** PowerShell window after install, then run `claudehome`.
-
-Re-running `.\install_client.ps1` is safe — prompts are skipped for values already configured.
+3. **Open a new PowerShell window** after install, then run `claudehome`. Re-running `.\install_client.ps1` is safe (prompts are skipped for values already configured).
 
 > **Note:** If you downloaded the repo as a ZIP instead of cloning, run `Unblock-File .\install_client.ps1` before executing. `git clone` doesn't require this.
 
@@ -145,24 +142,21 @@ Re-running `.\install_client.ps1` is safe — prompts are skipped for values alr
 
 The iPhone client is **any iOS SSH app** + Tailscale + the `claudehome` CLI installed on the mini in *local mode* (so SSH'ing in and typing `claudehome` gives you the same picker as on desktop, without a loopback SSH).
 
-**Install Tailscale on iPhone** — App Store → "Tailscale" → log in with the same account as the mini → toggle on.
+1. **Install Tailscale on iPhone.** App Store → "Tailscale" → log in with the same account as the mini → toggle on.
 
-**Install an SSH client.** Recommended:
+2. **Install an SSH client.** Recommended:
+   - **Termius** (free tier is enough) — polished UI, real tmux support. Free tier limitation: no iCloud key sync, but you only have one phone.
+   - **Blink Shell** ($, ~\$20/yr) — adds Mosh (resilient over flaky cellular), custom on-screen keyboards. Worth it if you'll use this every day.
+   - *Skip iSH* — local Linux emulator on the phone, not an SSH client. Wrong tool for this.
 
-- **Termius** (free tier is enough) — polished UI, real tmux support. Free tier limitation: no iCloud key sync, but you only have one phone.
-- **Blink Shell** ($, ~\$20/yr) — adds Mosh (resilient over flaky cellular), custom on-screen keyboards. Worth it if you'll use this every day.
-- *Skip iSH* — local Linux emulator on the phone, not an SSH client. Wrong tool for this.
+3. **Install claudehome on the mini in local mode** (one-time, at the mini's Terminal).
+   ```sh
+   cd /path/to/claudehome
+   ./install_server.sh
+   ```
+   This symlinks the `claudehome` CLI into your PATH on the mini and writes `CLAUDEHOME_LOCAL=1`. SSH'ing in from Termius and typing `claudehome` opens the picker locally — no loopback SSH.
 
-**Install claudehome on the mini in local mode** (one-time, at the mini's Terminal):
-
-```sh
-cd /path/to/claudehome
-./install_server.sh
-```
-
-This symlinks the `claudehome` CLI into your PATH on the mini and writes `CLAUDEHOME_LOCAL=1`. SSH'ing in from Termius and typing `claudehome` opens the picker locally — no loopback SSH.
-
-After §3 sets up your SSH key, add a host entry in Termius (*Vaults → Hosts → + →* Hostname `<mini-host>`, Username `<mini-user>`, Key = your generated key) and tap to connect. At the mini's prompt, type `claudehome` — same picker, same `[new project]` flow. Detach with `Ctrl-b d` (Termius and Blink both make `Ctrl` a one-tap key on the on-screen bar).
+4. **Connect** (after §3 sets up your SSH key). Add a host entry in Termius (*Vaults → Hosts → + →* Hostname `<mini-host>`, Username `<mini-user>`, Key = your generated key) and tap to connect. At the mini's prompt, type `claudehome` — same picker, same `[new project]` flow. Detach with `Ctrl-b d` (Termius and Blink both make `Ctrl` a one-tap key on the on-screen bar).
 
 ---
 
@@ -182,40 +176,33 @@ After installing Tailscale on every device (§1) and logging each into the same 
 
 Generate a key on each client and authorize it on the mini.
 
-#### Generate the key
+1. **Generate the key.**
 
-**Mac client:**
-```sh
-ssh-keygen -t ed25519 -C "$(hostname)"   # press Enter twice for no passphrase
-```
+   Mac client:
+   ```sh
+   ssh-keygen -t ed25519 -C "$(hostname)"   # press Enter twice for no passphrase
+   ```
 
-**Windows client:**
-```powershell
-ssh-keygen -t ed25519 -f $HOME\.ssh\id_ed25519 -C $env:COMPUTERNAME
-```
+   Windows client:
+   ```powershell
+   ssh-keygen -t ed25519 -f $HOME\.ssh\id_ed25519 -C $env:COMPUTERNAME
+   ```
 
-**iPhone (Termius):** *Vaults → Keys → + → Generate* (Ed25519). Use the share button to copy the public key string.
+   iPhone (Termius): *Vaults → Keys → + → Generate* (Ed25519). Use the share button to copy the public key string.
 
-#### Authorize the key on the mini
+2. **Authorize the key on the mini.** Copy each client's public key (`~/.ssh/id_ed25519.pub` on Mac/PC, or the share-copied string from Termius). At the mini's Terminal:
+   ```sh
+   mkdir -p ~/.ssh && chmod 700 ~/.ssh
+   echo 'ssh-ed25519 AAAA...your key line...' >> ~/.ssh/authorized_keys
+   chmod 600 ~/.ssh/authorized_keys
+   ```
+   Repeat the `echo` line for each client.
 
-Copy each client's public key (`~/.ssh/id_ed25519.pub` on Mac/PC, or the share-copied string from Termius). At the mini's Terminal:
-
-```sh
-mkdir -p ~/.ssh && chmod 700 ~/.ssh
-echo 'ssh-ed25519 AAAA...your key line...' >> ~/.ssh/authorized_keys
-chmod 600 ~/.ssh/authorized_keys
-```
-
-Repeat the `echo` line for each client.
-
-#### Verify
-
-From each client:
-```sh
-ssh -o BatchMode=yes <mini-user>@<mini-host> echo ok   # must print: ok
-```
-
-If it prompts for a password instead of returning `ok`, the key wasn't authorized correctly — check that you pasted the entire key line (`ssh-ed25519 AAAA...comment`) onto its own line in the mini's `~/.ssh/authorized_keys`.
+3. **Verify.** From each client:
+   ```sh
+   ssh -o BatchMode=yes <mini-user>@<mini-host> echo ok   # must print: ok
+   ```
+   If it prompts for a password instead of returning `ok`, the key wasn't authorized correctly — check that you pasted the entire key line (`ssh-ed25519 AAAA...comment`) onto its own line in the mini's `~/.ssh/authorized_keys`.
 
 ---
 
