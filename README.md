@@ -279,7 +279,7 @@ After this, mouse wheel scrolls directly inside tmux without needing scroll mode
 - Username: your `CLAUDEHOME_USER` value
 - SSH Private Key: `~/.ssh/id_ed25519`
 
-![Cyberduck SFTP connection dialog filled with mini hostname, username, and SSH private key path](docs/images/5_cyberduck.png)
+![Cyberduck SFTP connection dialog filled with mini hostname, username, and SSH private key path](docs/images/5_cyberducks.png)
 
 Connect, then navigate to `projects/claudehome-projects/<project>/`.
 
