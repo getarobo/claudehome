@@ -84,6 +84,14 @@ Run at the mini directly (Terminal.app):
    ```
    Claude prints a login URL. Open it in any browser, complete sign-in, paste the code back. Credentials save to `~/.claude/` on the mini and persist across reboots.
 
+8. **Install claudehome (enables local mode for iPhone access).**
+   ```sh
+   git clone git@github.com:getarobo/claudehome.git ~/projects/claudehome
+   cd ~/projects/claudehome
+   ./install_server.sh
+   ```
+   Symlinks the `claudehome` CLI into the mini's PATH and writes `CLAUDEHOME_LOCAL=1` to `~/.claudehomerc`. Lets you SSH into the mini (e.g., from iPhone Termius) and type `claudehome` to get the picker locally — no loopback SSH.
+
 #### Mac client
 
 1. **Install Tailscale.**
@@ -149,14 +157,7 @@ The iPhone client is **any iOS SSH app** + Tailscale + the `claudehome` CLI inst
    - **Blink Shell** ($, ~\$20/yr) — adds Mosh (resilient over flaky cellular), custom on-screen keyboards. Worth it if you'll use this every day.
    - *Skip iSH* — local Linux emulator on the phone, not an SSH client. Wrong tool for this.
 
-3. **Install claudehome on the mini in local mode** (one-time, at the mini's Terminal).
-   ```sh
-   cd /path/to/claudehome
-   ./install_server.sh
-   ```
-   This symlinks the `claudehome` CLI into your PATH on the mini and writes `CLAUDEHOME_LOCAL=1`. SSH'ing in from Termius and typing `claudehome` opens the picker locally — no loopback SSH.
-
-4. **Connect** (after §3 sets up your SSH key). Add a host entry in Termius (*Vaults → Hosts → + →* Hostname `<mini-host>`, Username `<mini-user>`, Key = your generated key) and tap to connect. At the mini's prompt, type `claudehome` — same picker, same `[new project]` flow. Detach with `Ctrl-b d` (Termius and Blink both make `Ctrl` a one-tap key on the on-screen bar).
+3. **Connect** (after §3 sets up your SSH key). Add a host entry in Termius (*Vaults → Hosts → + →* Hostname `<mini-host>`, Username `<mini-user>`, Key = your generated key) and tap to connect. At the mini's prompt, type `claudehome` — same picker, same `[new project]` flow. Detach with `Ctrl-b d` (Termius and Blink both make `Ctrl` a one-tap key on the on-screen bar).
 
 ---
 
