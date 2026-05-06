@@ -130,9 +130,9 @@ Run at the mini directly (Terminal.app):
    - Adds `<repo>\bin` to your user PATH
    - Saves config to `~/.claudehomerc`
 
-   The wizard does **not** set up your SSH key — that's §3.
+   The wizard does **not** set up your SSH key — that's §3. Re-running `.\install_client.ps1` is safe (prompts are skipped for values already configured).
 
-3. **Open a new PowerShell window** after install, then run `claudehome`. Re-running `.\install_client.ps1` is safe (prompts are skipped for values already configured).
+Open a **new** PowerShell window after install so the updated PATH takes effect, then run `claudehome`.
 
 > **Note:** If you downloaded the repo as a ZIP instead of cloning, run `Unblock-File .\install_client.ps1` before executing. `git clone` doesn't require this.
 
