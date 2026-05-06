@@ -95,7 +95,7 @@ Run at the mini directly (Terminal.app):
 
 ### 2. Tailscale admin console
 
-With the mini on the tailnet (from §1 step 1), open the admin console at https://login.tailscale.com/admin/machines — or click your Tailscale tray icon → your account row → **Admin console…**.
+Open the admin console at https://login.tailscale.com/admin/machines — or click your Tailscale tray icon → your account row → **Admin console…**.
 
 ![Opening the Tailscale admin console from the system tray](docs/images/1_tailscale_admin.jpg)
 
