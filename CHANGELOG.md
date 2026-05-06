@@ -5,6 +5,13 @@ All notable changes to `claudehome` are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses 4-part versioning: `MAJOR.MINOR.BUILD.REVISION`.
 
+## [1.0.3.1] - 2026-05-06
+
+### Documentation
+- **Mac v1 spec amendment** allowing `~/.claudehomerc`. Supersedes the original "env vars only, no config file in v1" wording in §Configuration, the "Config file, YAML/TOML settings" non-goal, the "No config files" trade-off line, and the "no config file" clause inside AC10. The rc file (`KEY=VALUE` per line, `#` comments, env vars take precedence) has been load-bearing since v1.0.1.0; the spec text now matches what was shipped.
+- **PC v1 spec amendment** recording (a) PC client is remote-only by design — `AC-LOCAL1–3` explicitly do not apply on PC, `bin/claudehome.ps1` has no IP-resolution / hostname-intersection logic, and AC-PC2 "same env var table" is loosened to permit the missing `CLAUDEHOME_LOCAL` row in PC `--help`; (b) `~/.claudehomerc` is allowed on PC, mirroring the Mac amendment. The "strict behavioral parity" pledge remains scoped to AC1–AC12 + AC13–AC18.
+- **CLAUDE.md refresh.** Stale line counts (`bin/claudehome` ~150 → ~310, `bin/claudehome.ps1` ~150 → ~228); stale AC-PC range fixed in two spots (AC-PC1–AC-PC8 → AC-PC1–AC-PC9, since AC-PC9 was added with `[new project]` parity); `--system` non-goal clarified as PowerShell-specific (the bash `install_client.sh` and `install_server.sh` do support `--system`).
+
 ## [1.0.3.0] - 2026-05-06
 
 ### Changed
