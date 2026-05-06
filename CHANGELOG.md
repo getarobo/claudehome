@@ -5,6 +5,23 @@ All notable changes to `claudehome` are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses 4-part versioning: `MAJOR.MINOR.BUILD.REVISION`.
 
+## [1.0.3.0] - 2026-05-06
+
+### Changed
+- **Default projects root renamed** from `~/projects/claudecode` to `~/projects/claudehome-projects`. The old name read like Claude Code's own directory rather than "the directory where claudehome looks for your projects." Mild breaking change for installs that were on the default; existing `~/.claudehomerc` files override the default and are unaffected. Anyone on the old default needs to either move the directory or pin the old path explicitly with `CLAUDEHOME_PROJECTS_DIR=~/projects/claudecode` in `~/.claudehomerc`.
+
+### Documentation
+- **Setup restructured into 4 sections.** Old shape interleaved Mac mini and client installs under one "Install software" section, then Tailscale admin console came after — meaning `install_client.sh`/`.ps1` prompted for the mini's hostname *before* the admin-console rename. New shape: §1 Mac mini install → §2 Tailscale admin console (rename mini, enable MagicDNS) → §3 Install clients (Mac/Windows/iPhone H4 subsections) → §4 SSH key setup. Admin-console rename now happens before any client wizard asks for a hostname.
+- **Best-README-Template install style.** Each platform's steps are numbered list items with code blocks indented under the parent step. Section H3s carry the order; H4 sub-letters (1a/1b/...) dropped.
+- **Tailscale admin console screenshots.** New `docs/images/` directory; §2 now includes tray-menu navigation, devices list with the mini renamed, and a Terminal screenshot illustrating `<mini-user>`.
+- **SFTP client screenshots.** Cyberduck (Mac) and WinSCP (Windows) connection-dialog screenshots wired into the Sending files section.
+- **`<mini-user>@<mini-host>` SSH login form spelled out** in §2 with an example (`genehan@gene-mini`) and a note that the macOS prompt's hostname is the local one, not the Tailscale one.
+- **Native iOS client formally a non-goal.** Termius/Blink + Tailscale + local-mode CLI on the mini is the documented iPhone story.
+- **`install_server.sh` moved to §1 step 8.** Local-mode CLI install on the mini was an iPhone-section step but it's a mini-side install; relocated so the mini is fully provisioned in one place.
+
+### Build
+- `.gitignore`: added `.claude/` (per-developer Claude Code settings).
+
 ## [1.0.2.1] - 2026-04-30
 
 ### Documentation

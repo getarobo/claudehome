@@ -1,4 +1,4 @@
-Version 1.0.2.1 — 2026-04-30
+Version 1.0.3.0 — 2026-05-06
 
 # claudehome
 
