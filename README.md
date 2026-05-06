@@ -26,124 +26,74 @@ Each project gets its own tmux session named `claudehome-<project>`. Sessions ou
 
 ## Setup
 
-Two roles: **server** (Mac mini, always on) and **client** (any device you connect from).
+Three sections, in order:
 
-The Mac mini needs only `tmux`, a logged-in `claude`, and SSH enabled — it never needs this repo installed. The `claudehome` CLI lives on the client.
+1. **Install software** — at each device directly.
+2. **Tailscale admin console** — register devices, name them, enable MagicDNS.
+3. **SSH key setup** — generate keys on clients, authorize them on the mini.
 
-> **Before you start:** Know your mini's account name — it may differ from what you expect.
-> At the mini's Terminal (or over SSH if you can already connect): `echo $USER`
-> Use that value wherever you see `<mini-user>` below.
+> **Before you start:** Know your mini's account name — it may differ from what you expect. At the mini's Terminal: `echo $USER`. Use that value wherever you see `<mini-user>` below.
 
 ---
 
-### 1. Mac mini — server (one-time)
+### 1. Install software
 
-**Steps 1a–1b require physical access (GUI). Everything after runs remotely.**
+#### 1a. Mac mini (server)
 
-#### 1a. Install Tailscale
+Run all of the following at the mini directly (Terminal.app):
 
-Download from https://tailscale.com/download, open the app, log in to the **same Tailscale account** your clients use.
+**Install Tailscale** — download from https://tailscale.com/download, open the app, log in to the tailnet you'll share with your clients. (Naming the device + enabling MagicDNS is §2.)
 
-- Confirm the mini appears in the [Tailscale admin console](https://login.tailscale.com/admin/machines).
-- Under the **DNS** tab, enable **MagicDNS** so clients can reach it by name (e.g. `<mini-host>`).
-- If the mini's Tailscale hostname isn't what you want, rename it on the admin page or set `CLAUDEHOME_HOST` on your clients later.
+**Enable SSH** — System Settings → General → Sharing → **Remote Login: on**.
 
-#### 1b. Enable SSH
-
-**System Settings → General → Sharing → Remote Login: on**
-
-#### 1c. Authorize your SSH key
-
-From your client, copy your public key to the mini using the mini's actual account name.
-
-**Mac client:**
+**Install tmux:**
 ```sh
-ssh-copy-id <mini-user>@<mini-host>
+brew install tmux
 ```
 
-**Windows client** (no `ssh-copy-id` in OpenSSH for Windows — append manually with password auth):
-```powershell
-# Generate a key first if you don't have one (press Enter twice for no passphrase):
-ssh-keygen -t ed25519 -f $HOME\.ssh\id_ed25519 -C $env:COMPUTERNAME
-
-$pub = (Get-Content $HOME\.ssh\id_ed25519.pub -Raw).Trim()
-ssh <mini-user>@<mini-host> "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '$pub' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-```
-
-Verify it works without a password prompt:
-
+**Install Claude Code** (skip if `claude` is already installed):
 ```sh
-ssh -o BatchMode=yes <mini-user>@<mini-host> echo ok   # must print: ok
+curl -fsSL https://claude.ai/install.sh | bash
 ```
 
-Once this returns `ok`, every remaining step can run remotely — no need to return to the mini.
-
-#### 1d. Install tmux
-
-```sh
-ssh <mini-host> 'brew install tmux'
-```
-
-#### 1e. Install Claude Code
-
-Skip if `claude` is already installed on the mini.
-
-```sh
-ssh <mini-host> 'curl -fsSL https://claude.ai/install.sh | bash'
-```
-
-#### 1f. Fix the SSH PATH
-
-macOS SSH sessions load `~/.zshenv` but **not** `~/.zshrc`, so tools installed via Homebrew are invisible over SSH by default. Without this step, `ssh <mini-host> 'claude'` returns `command not found`.
+**Fix the SSH PATH.** macOS SSH sessions load `~/.zshenv` but **not** `~/.zshrc`, so Homebrew-installed tools are invisible to the non-interactive SSH commands `claudehome` issues from clients. Without this step, the client returns `tmux: command not found` on first attach.
 
 Apple Silicon:
 ```sh
-echo 'export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"' \
-  | ssh <mini-host> 'cat >> ~/.zshenv'
+echo 'export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"' >> ~/.zshenv
 ```
 
 Intel Mac:
 ```sh
-echo 'export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"' \
-  | ssh <mini-host> 'cat >> ~/.zshenv'
+echo 'export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"' >> ~/.zshenv
 ```
 
-Verify:
+Verify (in a fresh shell):
 ```sh
-ssh <mini-host> 'which claude tmux'   # both paths should print
+which claude tmux   # both paths should print
 ```
 
-#### 1g. Create the projects root
-
+**Create the projects root:**
 ```sh
-ssh <mini-host> 'mkdir -p ~/projects/claudecode'
+mkdir -p ~/projects/claudecode
 ```
 
-#### 1h. Log Claude Code in (first time only)
-
-A fresh `claude` needs OAuth credentials. This requires an interactive TTY:
-
+**Log Claude Code in (one-time OAuth):**
 ```sh
-ssh -t <mini-user>@<mini-host> claude
+claude
 ```
-
 Claude prints a login URL. Open it in any browser, complete sign-in, paste the code back. Credentials save to `~/.claude/` on the mini and persist across reboots.
 
----
-
-### 2. Mac client (one-time per Mac)
+#### 1b. Mac client
 
 ```sh
-# Install Tailscale (same tailnet as the mini)
 brew install --cask tailscale
-
-# Clone and install
 git clone git@github.com:getarobo/claudehome.git ~/projects/claudehome
 cd ~/projects/claudehome
 ./install_client.sh
 ```
 
-The installer wizard handles the rest:
+The installer wizard:
 
 - Checks Tailscale is running (links to download if not)
 - Prompts for your mini's hostname and SSH username
@@ -151,13 +101,11 @@ The installer wizard handles the rest:
 - Appends `~/.local/bin` to your PATH in `~/.zshrc` if needed
 - Saves config to `~/.claudehomerc`
 
-The wizard does **not** generate or copy your SSH key. After install, follow §1c above to authorize your key on the mini, then verify with `ssh -o BatchMode=yes <mini-user>@<mini-host> echo ok`. The wizard prints the exact command to run.
+The wizard does **not** set up your SSH key — that's §3.
 
 Re-running `./install_client.sh` is safe — prompts are skipped for values already configured.
 
----
-
-### 3. Windows client — PowerShell 7+ (one-time per PC)
+#### 1c. Windows client — PowerShell 7+
 
 Install prerequisites first (if not already present):
 
@@ -175,7 +123,7 @@ Set-Location $HOME\projects\claudehome
 .\install_client.ps1
 ```
 
-The installer wizard handles the rest:
+The installer wizard:
 
 - Checks Tailscale is running (links to download if not)
 - Prompts for your mini's hostname and SSH username
@@ -183,7 +131,7 @@ The installer wizard handles the rest:
 - Adds `<repo>\bin` to your user PATH
 - Saves config to `~/.claudehomerc`
 
-The wizard does **not** generate or copy your SSH key — Windows OpenSSH lacks `ssh-copy-id` and key handling is brittle to automate. After install, follow §1c above to authorize your key on the mini, then verify with `ssh -o BatchMode=yes <mini-user>@<mini-host> echo ok`. The wizard prints the exact command to run.
+The wizard does **not** set up your SSH key — that's §3.
 
 Open a **new** PowerShell window after install, then run `claudehome`.
 
@@ -193,38 +141,81 @@ Re-running `.\install_client.ps1` is safe — prompts are skipped for values alr
 
 **Terminal tip:** Use WezTerm or Windows Terminal for best rendering. The `.cmd` shim also works from `cmd.exe`.
 
----
+#### 1d. iPhone
 
-### 4. iPhone
+The iPhone client is **any iOS SSH app** + Tailscale + the `claudehome` CLI installed on the mini in *local mode* (so SSH'ing in and typing `claudehome` gives you the same picker as on desktop, without a loopback SSH).
 
-The iPhone client is **any iOS SSH app** + Tailscale + the `claudehome` CLI installed on the mini in *local mode* (so SSH'ing in and typing `claudehome` gives you the same picker as on the desktop, without a loopback SSH).
+**Install Tailscale on iPhone** — App Store → "Tailscale" → log in with the same account as the mini → toggle on.
 
-**1. Install Tailscale on iPhone** — App Store → "Tailscale" → log in with the same account as the mini → toggle on.
-
-**2. Install an SSH client.** Recommended:
+**Install an SSH client.** Recommended:
 
 - **Termius** (free tier is enough) — polished UI, real tmux support. Free tier limitation: no iCloud key sync, but you only have one phone.
 - **Blink Shell** ($, ~\$20/yr) — adds Mosh (resilient over flaky cellular), custom on-screen keyboards. Worth it if you'll use this every day.
-- *Skip iSH* — it's a local Linux emulator on the phone, not an SSH client. Wrong tool for this.
+- *Skip iSH* — local Linux emulator on the phone, not an SSH client. Wrong tool for this.
 
-**3. Generate an SSH key in the app and authorize it on the mini.** In Termius: *Vaults → Keys → + → Generate* (Ed25519). Share/copy the public key, then on any machine that already has SSH access:
-
-```sh
-echo '<paste ssh-ed25519 AAAA... line>' | ssh <mini-host> 'cat >> ~/.ssh/authorized_keys'
-```
-
-**4. Add a host entry.** In Termius: *Vaults → Hosts → + →* Hostname `<mini-host>`, Username `<mini-user>`, Key = the one you just made.
-
-**5. Install claudehome on the mini in local mode** (one-time, on the mini itself):
+**Install claudehome on the mini in local mode** (one-time, at the mini's Terminal):
 
 ```sh
 cd /path/to/claudehome
 ./install_server.sh
 ```
 
-This symlinks the `claudehome` CLI into your PATH on the mini and writes `CLAUDEHOME_LOCAL=1`. Now SSH'ing in and typing `claudehome` opens the picker locally — no loopback SSH.
+This symlinks the `claudehome` CLI into your PATH on the mini and writes `CLAUDEHOME_LOCAL=1`. SSH'ing in from Termius and typing `claudehome` opens the picker locally — no loopback SSH.
 
-**6. Connect.** Tap the host in Termius. At the mini's prompt, type `claudehome`. Same picker, same `[new project]` flow. Detach with `Ctrl-b d` (Termius and Blink both make `Ctrl` a one-tap key on the on-screen bar).
+After §3 sets up your SSH key, add a host entry in Termius (*Vaults → Hosts → + →* Hostname `<mini-host>`, Username `<mini-user>`, Key = your generated key) and tap to connect. At the mini's prompt, type `claudehome` — same picker, same `[new project]` flow. Detach with `Ctrl-b d` (Termius and Blink both make `Ctrl` a one-tap key on the on-screen bar).
+
+---
+
+### 2. Tailscale admin console
+
+After installing Tailscale on every device (§1) and logging each into the same tailnet, open the admin console at https://login.tailscale.com/admin/machines.
+
+- **Confirm every device appears** in the device list.
+- **Rename each device** for cleaner hostnames — e.g., `mini`, `macbook`, `desktop`, `iphone`. Whatever you name the mini becomes its `<mini-host>` in `~/.claudehomerc`.
+- **DNS tab → toggle MagicDNS on** so devices can reach each other by name instead of IP.
+
+![Tailscale admin console — devices listed and named](docs/images/tailscale-admin.png)
+
+---
+
+### 3. SSH key setup
+
+Generate a key on each client and authorize it on the mini.
+
+#### 3a. Generate the key
+
+**Mac client:**
+```sh
+ssh-keygen -t ed25519 -C "$(hostname)"   # press Enter twice for no passphrase
+```
+
+**Windows client:**
+```powershell
+ssh-keygen -t ed25519 -f $HOME\.ssh\id_ed25519 -C $env:COMPUTERNAME
+```
+
+**iPhone (Termius):** *Vaults → Keys → + → Generate* (Ed25519). Use the share button to copy the public key string.
+
+#### 3b. Authorize the key on the mini
+
+Copy each client's public key (`~/.ssh/id_ed25519.pub` on Mac/PC, or the share-copied string from Termius). At the mini's Terminal:
+
+```sh
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+echo 'ssh-ed25519 AAAA...your key line...' >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+```
+
+Repeat the `echo` line for each client.
+
+#### 3c. Verify
+
+From each client:
+```sh
+ssh -o BatchMode=yes <mini-user>@<mini-host> echo ok   # must print: ok
+```
+
+If it prompts for a password instead of returning `ok`, the key wasn't authorized correctly — check that you pasted the entire key line (`ssh-ed25519 AAAA...comment`) onto its own line in the mini's `~/.ssh/authorized_keys`.
 
 ---
 
@@ -362,7 +353,7 @@ Run `tailscale status` on both devices — both should list the other as connect
 Run `brew install tmux` on the Mac mini.
 
 **`claude: command not found` inside a session**
-The SSH non-interactive shell can't find `claude`. Add its directory to `PATH` in `~/.zshenv` on the mini (not `~/.zshrc` — SSH doesn't load it). See step 1f above.
+The SSH non-interactive shell can't find `claude`. Add its directory to `PATH` in `~/.zshenv` on the mini (not `~/.zshrc` — SSH doesn't load it). See §1a → *Fix the SSH PATH*.
 
 **Orphaned tmux sessions**
 If you delete a project directory, its session lingers. Remove it:
@@ -374,12 +365,12 @@ ssh <mini-host> 'tmux kill-session -t claudehome-<project-name>'
 
 ## Non-goals (v1)
 
-- Web UI or native mobile app (iPhone access is solved via Termius/Blink + Tailscale + local-mode CLI on the mini — see Section 4)
+- Web UI or native mobile app (iPhone access is solved via Termius/Blink + Tailscale + local-mode CLI on the mini — see §1d)
 - `claudehome new <name>` subcommand — use the `[new project]` picker option instead (no extra CLI surface added)
 - Session management subcommands (`ls`, `kill`, `attach <name>`)
 - Automatic cleanup of orphaned sessions
 - Multi-user or shared Mac mini
-- Server-side bootstrap script (mini setup is manual per Section 1)
+- Server-side bootstrap script (mini setup is manual per §1a)
 
 ---
 
