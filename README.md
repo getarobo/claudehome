@@ -38,7 +38,7 @@ Three sections, in order:
 
 ### 1. Install software
 
-#### 1a. Mac mini (server)
+#### Mac mini (server)
 
 Run all of the following at the mini directly (Terminal.app):
 
@@ -84,7 +84,7 @@ claude
 ```
 Claude prints a login URL. Open it in any browser, complete sign-in, paste the code back. Credentials save to `~/.claude/` on the mini and persist across reboots.
 
-#### 1b. Mac client
+#### Mac client
 
 ```sh
 brew install --cask tailscale
@@ -105,7 +105,7 @@ The wizard does **not** set up your SSH key — that's §3.
 
 Re-running `./install_client.sh` is safe — prompts are skipped for values already configured.
 
-#### 1c. Windows client — PowerShell 7+
+#### Windows client — PowerShell 7+
 
 Install prerequisites first (if not already present):
 
@@ -141,7 +141,7 @@ Re-running `.\install_client.ps1` is safe — prompts are skipped for values alr
 
 **Terminal tip:** Use WezTerm or Windows Terminal for best rendering. The `.cmd` shim also works from `cmd.exe`.
 
-#### 1d. iPhone
+#### iPhone
 
 The iPhone client is **any iOS SSH app** + Tailscale + the `claudehome` CLI installed on the mini in *local mode* (so SSH'ing in and typing `claudehome` gives you the same picker as on desktop, without a loopback SSH).
 
@@ -182,7 +182,7 @@ After installing Tailscale on every device (§1) and logging each into the same 
 
 Generate a key on each client and authorize it on the mini.
 
-#### 3a. Generate the key
+#### Generate the key
 
 **Mac client:**
 ```sh
@@ -196,7 +196,7 @@ ssh-keygen -t ed25519 -f $HOME\.ssh\id_ed25519 -C $env:COMPUTERNAME
 
 **iPhone (Termius):** *Vaults → Keys → + → Generate* (Ed25519). Use the share button to copy the public key string.
 
-#### 3b. Authorize the key on the mini
+#### Authorize the key on the mini
 
 Copy each client's public key (`~/.ssh/id_ed25519.pub` on Mac/PC, or the share-copied string from Termius). At the mini's Terminal:
 
@@ -208,7 +208,7 @@ chmod 600 ~/.ssh/authorized_keys
 
 Repeat the `echo` line for each client.
 
-#### 3c. Verify
+#### Verify
 
 From each client:
 ```sh
@@ -353,7 +353,7 @@ Run `tailscale status` on both devices — both should list the other as connect
 Run `brew install tmux` on the Mac mini.
 
 **`claude: command not found` inside a session**
-The SSH non-interactive shell can't find `claude`. Add its directory to `PATH` in `~/.zshenv` on the mini (not `~/.zshrc` — SSH doesn't load it). See §1a → *Fix the SSH PATH*.
+The SSH non-interactive shell can't find `claude`. Add its directory to `PATH` in `~/.zshenv` on the mini (not `~/.zshrc` — SSH doesn't load it). See §1 (Mac mini → *Fix the SSH PATH*).
 
 **Orphaned tmux sessions**
 If you delete a project directory, its session lingers. Remove it:
@@ -365,12 +365,12 @@ ssh <mini-host> 'tmux kill-session -t claudehome-<project-name>'
 
 ## Non-goals (v1)
 
-- Web UI or native mobile app (iPhone access is solved via Termius/Blink + Tailscale + local-mode CLI on the mini — see §1d)
+- Web UI or native mobile app (iPhone access is solved via Termius/Blink + Tailscale + local-mode CLI on the mini — see §1, iPhone)
 - `claudehome new <name>` subcommand — use the `[new project]` picker option instead (no extra CLI surface added)
 - Session management subcommands (`ls`, `kill`, `attach <name>`)
 - Automatic cleanup of orphaned sessions
 - Multi-user or shared Mac mini
-- Server-side bootstrap script (mini setup is manual per §1a)
+- Server-side bootstrap script (mini setup is manual per §1, Mac mini)
 
 ---
 
