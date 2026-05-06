@@ -277,6 +277,8 @@ After this, mouse wheel scrolls directly inside tmux without needing scroll mode
 - Username: your `CLAUDEHOME_USER` value
 - SSH Private Key: `~/.ssh/id_ed25519`
 
+![Cyberduck SFTP connection dialog filled with mini hostname, username, and SSH private key path](docs/images/5_cyberduck.png)
+
 Connect, then navigate to `projects/claudehome-projects/<project>/`.
 
 **WinSCP (Windows)** — *New Site* → File protocol: **SFTP**:
@@ -284,6 +286,8 @@ Connect, then navigate to `projects/claudehome-projects/<project>/`.
 - Host name: your Tailscale hostname
 - User name: your mini SSH user
 - *Advanced → SSH → Authentication →* Private key file: `~/.ssh/id_ed25519`
+
+![WinSCP Login dialog with SFTP protocol selected, Mac mini hostname and user filled in](docs/images/4_winscp.jpg)
 
 Modern WinSCP reads OpenSSH keys directly; older versions prompt to convert to `.ppk` once.
 
