@@ -374,8 +374,7 @@ ssh <mini-host> 'tmux kill-session -t claudehome-<project-name>'
 
 ## Non-goals (v1)
 
-- Web UI or native mobile app
-- iPhone client (planned — Blink Shell in the meantime)
+- Web UI or native mobile app (iPhone access is solved via Termius/Blink + Tailscale + local-mode CLI on the mini — see Section 4)
 - `claudehome new <name>` subcommand — use the `[new project]` picker option instead (no extra CLI surface added)
 - Session management subcommands (`ls`, `kill`, `attach <name>`)
 - Automatic cleanup of orphaned sessions

@@ -36,7 +36,7 @@ The following are explicit non-goals — **do not add them** without updating th
 - PowerShell 5.1 support (pwsh 7+ only for the Windows client)
 - Server-side bootstrap (mini setup remains manual per README)
 
-iPhone client is planned but out of scope for this pass.
+iPhone access is solved via any iOS SSH app (Termius, Blink) + Tailscale + the mini's local-mode CLI (`install_server.sh`). A native iOS client is intentionally not pursued — do not propose one.
 
 ## Key docs
 
