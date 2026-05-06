@@ -26,19 +26,18 @@ Each project gets its own tmux session named `claudehome-<project>`. Sessions ou
 
 ## Setup
 
-Three sections, in order:
+Four sections, in order:
 
-1. **Install software** — at each device directly.
-2. **Tailscale admin console** — register devices, name them, enable MagicDNS.
-3. **SSH key setup** — generate keys on clients, authorize them on the mini.
+1. **Mac mini (server)** — full server-side install.
+2. **Tailscale admin console** — name the mini, enable MagicDNS.
+3. **Install clients** — Mac, Windows, iPhone.
+4. **SSH key setup** — generate keys on clients, authorize on the mini.
 
 > **Before you start:** Know your mini's account name — it may differ from what you expect. At the mini's Terminal: `echo $USER`. Use that value wherever you see `<mini-user>` below.
 
 ---
 
-### 1. Install software
-
-#### Mac mini (server)
+### 1. Mac mini (server)
 
 Run at the mini directly (Terminal.app):
 
@@ -92,6 +91,24 @@ Run at the mini directly (Terminal.app):
    ```
    Symlinks the `claudehome` CLI into the mini's PATH and writes `CLAUDEHOME_LOCAL=1` to `~/.claudehomerc`. Lets you SSH into the mini (e.g., from iPhone Termius) and type `claudehome` to get the picker locally — no loopback SSH.
 
+---
+
+### 2. Tailscale admin console
+
+With the mini on the tailnet (from §1 step 1), open the admin console at https://login.tailscale.com/admin/machines.
+
+- **Confirm the mini appears** in the device list.
+- **Rename the mini** for a cleaner hostname — e.g., `mini`. Whatever you name it becomes its `<mini-host>` in your clients' `~/.claudehomerc`.
+- **DNS tab → toggle MagicDNS on** so devices can reach each other by name instead of IP. (One-time tailnet setting; applies to clients added later.)
+
+Clients added in §3 will also appear here once they join the tailnet — rename them too if you want clean names, but only the mini's name is load-bearing.
+
+![Tailscale admin console — devices listed and named](docs/images/tailscale-admin.png)
+
+---
+
+### 3. Install clients
+
 #### Mac client
 
 1. **Install Tailscale.**
@@ -113,7 +130,7 @@ Run at the mini directly (Terminal.app):
    - Appends `~/.local/bin` to your PATH in `~/.zshrc` if needed
    - Saves config to `~/.claudehomerc`
 
-   The wizard does **not** set up your SSH key — that's §3. Re-running `./install_client.sh` is safe (prompts are skipped for values already configured).
+   The wizard does **not** set up your SSH key — that's §4. Re-running `./install_client.sh` is safe (prompts are skipped for values already configured).
 
 #### Windows client — PowerShell 7+
 
@@ -138,7 +155,7 @@ Run at the mini directly (Terminal.app):
    - Adds `<repo>\bin` to your user PATH
    - Saves config to `~/.claudehomerc`
 
-   The wizard does **not** set up your SSH key — that's §3. Re-running `.\install_client.ps1` is safe (prompts are skipped for values already configured).
+   The wizard does **not** set up your SSH key — that's §4. Re-running `.\install_client.ps1` is safe (prompts are skipped for values already configured).
 
 Open a **new** PowerShell window after install so the updated PATH takes effect, then run `claudehome`.
 
@@ -157,23 +174,11 @@ The iPhone client is **any iOS SSH app** + Tailscale + the `claudehome` CLI inst
    - **Blink Shell** ($, ~\$20/yr) — adds Mosh (resilient over flaky cellular), custom on-screen keyboards. Worth it if you'll use this every day.
    - *Skip iSH* — local Linux emulator on the phone, not an SSH client. Wrong tool for this.
 
-3. **Connect** (after §3 sets up your SSH key). Add a host entry in Termius (*Vaults → Hosts → + →* Hostname `<mini-host>`, Username `<mini-user>`, Key = your generated key) and tap to connect. At the mini's prompt, type `claudehome` — same picker, same `[new project]` flow. Detach with `Ctrl-b d` (Termius and Blink both make `Ctrl` a one-tap key on the on-screen bar).
+3. **Connect** (after §4 sets up your SSH key). Add a host entry in Termius (*Vaults → Hosts → + →* Hostname `<mini-host>`, Username `<mini-user>`, Key = your generated key) and tap to connect. At the mini's prompt, type `claudehome` — same picker, same `[new project]` flow. Detach with `Ctrl-b d` (Termius and Blink both make `Ctrl` a one-tap key on the on-screen bar).
 
 ---
 
-### 2. Tailscale admin console
-
-After installing Tailscale on every device (§1) and logging each into the same tailnet, open the admin console at https://login.tailscale.com/admin/machines.
-
-- **Confirm every device appears** in the device list.
-- **Rename each device** for cleaner hostnames — e.g., `mini`, `macbook`, `desktop`, `iphone`. Whatever you name the mini becomes its `<mini-host>` in `~/.claudehomerc`.
-- **DNS tab → toggle MagicDNS on** so devices can reach each other by name instead of IP.
-
-![Tailscale admin console — devices listed and named](docs/images/tailscale-admin.png)
-
----
-
-### 3. SSH key setup
+### 4. SSH key setup
 
 Generate a key on each client and authorize it on the mini.
 
@@ -341,7 +346,7 @@ Run `tailscale status` on both devices — both should list the other as connect
 Run `brew install tmux` on the Mac mini.
 
 **`claude: command not found` inside a session**
-The SSH non-interactive shell can't find `claude`. Add its directory to `PATH` in `~/.zshenv` on the mini (not `~/.zshrc` — SSH doesn't load it). See §1 (Mac mini → *Fix the SSH PATH*).
+The SSH non-interactive shell can't find `claude`. Add its directory to `PATH` in `~/.zshenv` on the mini (not `~/.zshrc` — SSH doesn't load it). See §1 → *Fix the SSH PATH*.
 
 **Orphaned tmux sessions**
 If you delete a project directory, its session lingers. Remove it:
@@ -353,12 +358,12 @@ ssh <mini-host> 'tmux kill-session -t claudehome-<project-name>'
 
 ## Non-goals (v1)
 
-- Web UI or native mobile app (iPhone access is solved via Termius/Blink + Tailscale + local-mode CLI on the mini — see §1, iPhone)
+- Web UI or native mobile app (iPhone access is solved via Termius/Blink + Tailscale + local-mode CLI on the mini — see §3, iPhone)
 - `claudehome new <name>` subcommand — use the `[new project]` picker option instead (no extra CLI surface added)
 - Session management subcommands (`ls`, `kill`, `attach <name>`)
 - Automatic cleanup of orphaned sessions
 - Multi-user or shared Mac mini
-- Server-side bootstrap script (mini setup is manual per §1, Mac mini)
+- Server-side bootstrap script (mini setup is manual per §1)
 
 ---
 
