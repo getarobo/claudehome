@@ -95,15 +95,17 @@ Run at the mini directly (Terminal.app):
 
 ### 2. Tailscale admin console
 
-With the mini on the tailnet (from §1 step 1), open the admin console at https://login.tailscale.com/admin/machines.
+With the mini on the tailnet (from §1 step 1), open the admin console at https://login.tailscale.com/admin/machines — or click your Tailscale tray icon → your account row → **Admin console…**.
+
+![Opening the Tailscale admin console from the system tray](docs/images/1_tailscale_admin.jpg)
 
 - **Confirm the mini appears** in the device list.
-- **Rename the mini** for a cleaner hostname — e.g., `mini`. Whatever you name it becomes its `<mini-host>` in your clients' `~/.claudehomerc`.
+- **Rename the mini** for a cleaner hostname — e.g., `gene-mini`. Whatever you name it becomes its `<mini-host>` in your clients' `~/.claudehomerc`.
 - **DNS tab → toggle MagicDNS on** so devices can reach each other by name instead of IP. (One-time tailnet setting; applies to clients added later.)
 
-Clients added in §3 will also appear here once they join the tailnet — rename them too if you want clean names, but only the mini's name is load-bearing.
+![Tailscale admin console with the mini renamed (highlighted)](docs/images/2_tailscale_servername.jpg)
 
-![Tailscale admin console — devices listed and named](docs/images/tailscale-admin.png)
+Clients added in §3 will also appear here once they join the tailnet — rename them too if you want clean names, but only the mini's name is load-bearing.
 
 ---
 
