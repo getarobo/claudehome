@@ -1,4 +1,5 @@
 .DS_Store
 .claude/
 .omc/state/
+.omc/sessions/
 .omc/project-memory.json

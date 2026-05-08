@@ -17,9 +17,12 @@ Usage: claudehome
   with CLAUDEHOME_LOCAL=1), the SSH layer is skipped and the picker plus
   attach run locally — useful when SSH'd into the mini from iPhone, etc.
 
-  The last picker row is [new project] — pick it to create a fresh
-  directory on the Mac mini and start a session there. Names are validated
-  against the same allowlist applied to env vars; duplicates are refused.
+  Folders organize projects in a drill-down picker — pick [new folder here]
+  to create one. Project names are globally unique across the whole tree;
+  tmux sessions are named claudehome-<basename> regardless of folder depth.
+  The last picker row is [new project here] — pick it to create a fresh
+  project at the current drill level. Names are validated against the same
+  allowlist applied to env vars; duplicates are refused.
 
 Environment variables (or set in ~/.claudehomerc):
   CLAUDEHOME_HOST          Tailscale hostname of the Mac mini   (required)
@@ -160,18 +163,55 @@ case "$PROJECTS_DIR" in
   '~/'*) LOCAL_DIR="${HOME}/${PROJECTS_DIR#\~/}" ;;
 esac
 
-# ---- fetch picker data (single SSH round-trip; skipped in local mode) ----
-# Remote mode: run the remote command with `bash --norc --noprofile -c` so
-# profile noise (conda init, nvm, pyenv, Tailscale banners, MOTD) cannot
-# pollute our sentinel-delimited output. Client-side variables expand inside
-# the outer double quotes; remote-side `~` expansion happens inside the
-# clean bash.
-# Local mode: same listing pattern, but we skip SSH entirely. Output shape
-# is byte-identical so the parser below doesn't care which branch ran.
+# ---- tree-walk emitter (shared between local and remote modes) ----
+# Emits "<path>\t<type>\t<child_count>\n" rows for every directory under the
+# projects root, plus optional ---TRUNCATED--- / ---DEPTH-TRUNCATED--- sentinels.
+# Type is R (synthetic root, only the `.` row), F (folder — every immediate
+# child is a directory), or P (project — empty or has at least one non-dir
+# immediate child). See plan §3.1, §3.2.
+#
+# Quoting: this snippet is interpolated into both the local-mode block (as
+# direct shell code) and into the remote `bash --norc --noprofile -c '...'`
+# wrapper (where every `$` that should reach the remote bash is escaped to
+# `\$` and every double quote is escaped to `\"`). We keep two copies because
+# the remote-mode escape conventions diverge enough that a single string with
+# placeholder substitution would be more error-prone than two readable copies.
+
 if (( LOCAL_MODE )); then
   RAW=$(
     {
-      ls -1 "$LOCAL_DIR" 2>/dev/null || true
+      echo ---TREE---
+      ( cd "$LOCAL_DIR" 2>/dev/null && {
+          total=$(find . -maxdepth 8 -type d ! -path '*/.*' 2>/dev/null | wc -l | tr -d ' ')
+          deeper=$(find . -mindepth 9 -type d ! -path '*/.*' 2>/dev/null | head -n 1)
+          # Truncation: macOS BWK awk does not support -v RS='\0' (records get
+          # collapsed). We instead count inside the bash while-loop and break
+          # at 2000 — portable across BWK awk, GNU awk, and bash 3.2.
+          i=0
+          find . -maxdepth 8 -type d ! -path '*/.*' -print0 2>/dev/null \
+            | while IFS= read -r -d '' p; do
+                i=$(( i + 1 ))
+                [ "$i" -gt 2000 ] && break
+                rel="${p#./}"
+                [ "$p" = "." ] && rel="."
+                n_all=0; n_dirs=0
+                for c in "$p"/* "$p"/.[!.]* "$p"/..?* ; do
+                  [ -e "$c" ] || continue
+                  n_all=$(( n_all + 1 ))
+                  [ -d "$c" ] && n_dirs=$(( n_dirs + 1 ))
+                done
+                if [ "$rel" = "." ]; then
+                  t=R
+                elif [ "$n_all" -gt 0 ] && [ "$n_all" = "$n_dirs" ]; then
+                  t=F
+                else
+                  t=P
+                fi
+                printf '%s\t%s\t%s\n' "$rel" "$t" "$n_all"
+              done
+          [ "$total" -gt 2000 ] && echo ---TRUNCATED---
+          [ -n "$deeper" ] && echo ---DEPTH-TRUNCATED---
+        } )
       echo ---TMUX---
       tmux list-sessions -F "#{session_name} #{session_activity}" 2>/dev/null || true
     }
@@ -179,7 +219,34 @@ if (( LOCAL_MODE )); then
 else
   # shellcheck disable=SC2029
   if ! RAW=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "${REMOTE_USER}@${HOST}" "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c '
-    ls -1 ${PROJECTS_DIR} 2>/dev/null || true
+    cd ${PROJECTS_DIR} 2>/dev/null || exit 0
+    echo ---TREE---
+    total=\$(find . -maxdepth 8 -type d ! -path \"*/.*\" 2>/dev/null | wc -l | tr -d \" \")
+    deeper=\$(find . -mindepth 9 -type d ! -path \"*/.*\" 2>/dev/null | head -n 1)
+    i=0
+    find . -maxdepth 8 -type d ! -path \"*/.*\" -print0 2>/dev/null \
+      | while IFS= read -r -d \"\" p; do
+          i=\$(( i + 1 ))
+          [ \"\$i\" -gt 2000 ] && break
+          rel=\"\${p#./}\"
+          [ \"\$p\" = \".\" ] && rel=\".\"
+          n_all=0; n_dirs=0
+          for c in \"\$p\"/* \"\$p\"/.[!.]* \"\$p\"/..?* ; do
+            [ -e \"\$c\" ] || continue
+            n_all=\$(( n_all + 1 ))
+            [ -d \"\$c\" ] && n_dirs=\$(( n_dirs + 1 ))
+          done
+          if [ \"\$rel\" = \".\" ]; then
+            t=R
+          elif [ \"\$n_all\" -gt 0 ] && [ \"\$n_all\" = \"\$n_dirs\" ]; then
+            t=F
+          else
+            t=P
+          fi
+          printf \"%s\\t%s\\t%s\\n\" \"\$rel\" \"\$t\" \"\$n_all\"
+        done
+    [ \"\$total\" -gt 2000 ] && echo ---TRUNCATED---
+    [ -n \"\$deeper\" ] && echo ---DEPTH-TRUNCATED---
     echo ---TMUX---
     tmux list-sessions -F \"#{session_name} #{session_activity}\" 2>/dev/null || true
   '" 2>/dev/null); then
@@ -191,121 +258,635 @@ else
   fi
 fi
 
-PROJECTS_BLOCK="${RAW%%---TMUX---*}"
+# Split RAW into tree and tmux blocks. The pre-`---TREE---` slice (banner /
+# stray output) is discarded.
+TREE_BLOCK="${RAW#*---TREE---}"
+TREE_BLOCK="${TREE_BLOCK%%---TMUX---*}"
 TMUX_BLOCK="${RAW#*---TMUX---}"
 
-# ---- build picker rows ----
-# We keep TMUX_BLOCK as a newline-separated string of "session_name ts" pairs and
-# look up each project with awk. No bash-4 associative array needed (macOS ships
-# bash 3.2 by default, so this stays portable without a Homebrew bash dependency).
+# ---- parse tree rows ----
+# Populates four parallel arrays keyed by row index:
+#   TREE_PATH[i]      — relative path (e.g. "work/client-a/site"; "." for synthetic root)
+#   TREE_TYPE[i]      — "R", "F", or "P"
+#   TREE_CHILDREN[i]  — immediate-child count (integer)
+#   TREE_PARENT[i]    — parent path ("" for top-level rows; "" for "." root)
 #
-# Ordering: active projects first, sorted by tmux session activity descending
-# (most-recently-used at top); idle projects below them, alphabetical; the
-# `[new project]` sentinel is always the last row.
-NEW_PROJECT_ROW='[new project]'
-PICKER_NAMES=()
+# Wire-format invariant: every emitted path matches
+# `^([a-zA-Z0-9._-]+/)*[a-zA-Z0-9._-]+$` OR is exactly `.`. Rows that fail are
+# silently dropped; a single deduped stderr warning is printed per session.
+TREE_PATH=()
+TREE_TYPE=()
+TREE_CHILDREN=()
+TREE_PARENT=()
+TRUNCATED_ROWS=0
+TRUNCATED_DEPTH=0
+SKIPPED_BAD_PATHS=0
+
 NOW=$(date +%s)
 
-# Build sortable rows as "<sort_key>\t<display_line>" lines. Active projects
-# use the tmux activity timestamp as the key (so larger = more recent); idle
-# projects use 0 so they cluster below active. Secondary sort on the line
-# itself gives alphabetical order within the idle group.
-SORT_INPUT=
-while IFS= read -r project; do
-  [[ -z "$project" ]] && continue
-  ts=$(awk -v s="claudehome-${project}" '$1==s { print $2; exit }' <<< "$TMUX_BLOCK")
-  if [[ -n "${ts:-}" ]]; then
-    age=$(( NOW - ts ))
-    (( age < 0 )) && age=0   # clamp client-vs-server clock skew
-    if   (( age < 60 ));    then label="${age}s ago"
-    elif (( age < 3600 ));  then label="$(( age / 60 ))m ago"
-    elif (( age < 86400 )); then label="$(( age / 3600 ))h ago"
-    else                         label="$(( age / 86400 ))d ago"
-    fi
-    SORT_INPUT+="${ts}"$'\t'"${project}  [active ${label}]"$'\n'
-  else
-    SORT_INPUT+="0"$'\t'"${project}  [idle]"$'\n'
+while IFS= read -r row; do
+  [[ -z "$row" ]] && continue
+  case "$row" in
+    '---TRUNCATED---')      TRUNCATED_ROWS=1;  continue ;;
+    '---DEPTH-TRUNCATED---') TRUNCATED_DEPTH=1; continue ;;
+  esac
+  # TAB-split into three fields.
+  IFS=$'\t' read -r tp tt tc <<< "$row"
+  [[ -z "${tp:-}" || -z "${tt:-}" ]] && continue
+  # Enforce wire-format invariant. A TAB or newline embedded in an on-disk
+  # directory name corrupts the wire format mid-row: the first segment lands
+  # in $tp (and may pass the allowlist regex), but the type field $tt then
+  # holds garbage. Reject any row whose type is not R/F/P, which catches the
+  # TAB-in-name case the path allowlist misses.
+  if [[ ! "$tt" =~ ^[RFP]$ ]]; then
+    SKIPPED_BAD_PATHS=$(( SKIPPED_BAD_PATHS + 1 ))
+    continue
   fi
-  PICKER_NAMES+=("$project")
-done <<< "$PROJECTS_BLOCK"
+  if [[ "$tp" != "." && ! "$tp" =~ ^([a-zA-Z0-9._-]+/)*[a-zA-Z0-9._-]+$ ]]; then
+    SKIPPED_BAD_PATHS=$(( SKIPPED_BAD_PATHS + 1 ))
+    continue
+  fi
+  # Compute parent.
+  if [[ "$tp" == "." ]]; then
+    parent=""
+  elif [[ "$tp" == */* ]]; then
+    parent="${tp%/*}"
+  else
+    parent=""
+  fi
+  TREE_PATH+=("$tp")
+  TREE_TYPE+=("$tt")
+  TREE_CHILDREN+=("${tc:-0}")
+  TREE_PARENT+=("$parent")
+done <<< "$TREE_BLOCK"
 
-PICKER_LINES=()
-if [[ -n "$SORT_INPUT" ]]; then
-  while IFS=$'\t' read -r _key line; do
-    [[ -z "$line" ]] && continue
-    PICKER_LINES+=("$line")
-  done < <(printf '%s' "$SORT_INPUT" | sort -t$'\t' -k1,1nr -k2,2)
+if (( SKIPPED_BAD_PATHS > 0 )); then
+  echo "claudehome: skipped ${SKIPPED_BAD_PATHS} path with disallowed characters — rename on the mini to surface it" >&2
 fi
-PICKER_LINES+=("$NEW_PROJECT_ROW")
-
-# ---- picker (fzf preferred, bash `select` fallback) ----
-SELECTED=
-if command -v fzf >/dev/null 2>&1; then
-  SELECTED=$(printf '%s\n' "${PICKER_LINES[@]}" | fzf --prompt='claudehome> ' --height=~50% --reverse) || exit 0
-else
-  PS3='Select a project: '
-  select SELECTED in "${PICKER_LINES[@]}"; do
-    [[ -n "${SELECTED:-}" ]] && break
-  done
-  # Ctrl-D / EOF out of `select` leaves SELECTED empty; exit cleanly.
-  [[ -z "${SELECTED:-}" ]] && exit 0
+if (( TRUNCATED_ROWS )); then
+  echo "claudehome: tree truncated at 2000 entries — clean up your projects dir" >&2
+fi
+if (( TRUNCATED_DEPTH )); then
+  echo "claudehome: tree depth >8 not shown — reorganize on the mini" >&2
 fi
 
-# Resolve the picked row into a project name. The `[new project]` sentinel
-# triggers an inline prompt loop; otherwise extract the name from the row
-# (everything before the double-space annotation column).
-if [[ "$SELECTED" == "$NEW_PROJECT_ROW" ]]; then
-  PROJECT=
-  while [[ -z "$PROJECT" ]]; do
-    read -r -p "New project name: " NEW_PROJECT_NAME || exit 0
-    [[ -z "$NEW_PROJECT_NAME" ]] && exit 0
-    if [[ ! "$NEW_PROJECT_NAME" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-      echo "  '${NEW_PROJECT_NAME}' has unsupported characters. Allowed: letters, digits, '.', '_', '-'. Try again." >&2
-      continue
+# ---- helpers shared by drill loop ----
+
+# Look up tmux session activity for a basename. Sets ACT_TS (timestamp string,
+# empty if idle) and ACT_LABEL (human "5m ago" string, empty if idle).
+_session_activity() {
+  local basename=$1
+  ACT_TS=$(awk -v s="claudehome-${basename}" '$1==s { print $2; exit }' <<< "$TMUX_BLOCK")
+  ACT_LABEL=
+  if [[ -n "${ACT_TS:-}" ]]; then
+    local age=$(( NOW - ACT_TS ))
+    (( age < 0 )) && age=0   # clamp client-vs-server clock skew
+    if   (( age < 60 ));    then ACT_LABEL="${age}s ago"
+    elif (( age < 3600 ));  then ACT_LABEL="$(( age / 60 ))m ago"
+    elif (( age < 86400 )); then ACT_LABEL="$(( age / 3600 ))h ago"
+    else                         ACT_LABEL="$(( age / 86400 ))d ago"
     fi
-    DUP=0
-    for existing in "${PICKER_NAMES[@]}"; do
-      [[ "$existing" == "$NEW_PROJECT_NAME" ]] && { DUP=1; break; }
+  fi
+}
+
+# ---- build_rows_for_path(path) ----
+# Filters TREE_* arrays to direct children of $path and populates three
+# parallel arrays of picker rows:
+#   PICKER_LINES[]    — display strings (what fzf/select see)
+#   PICKER_KIND[]     — one of: back / folder / project / root_bucket / new_folder / new_project
+#   PICKER_PAYLOAD[]  — context-dependent: full path for folder/project, ".root" for root_bucket, "" for the rest
+#
+# Special case: path == ".root" filters to root-level projects only (the
+# synthetic `(root)` drill).
+build_rows_for_path() {
+  local path=$1
+  PICKER_LINES=()
+  PICKER_KIND=()
+  PICKER_PAYLOAD=()
+
+  # [..  back] for non-root non-root_bucket frames.
+  if [[ -n "$path" && "$path" != ".root" ]]; then
+    PICKER_LINES+=("[..  back]")
+    PICKER_KIND+=("back")
+    PICKER_PAYLOAD+=("")
+  fi
+
+  local i n n_rows=${#TREE_PATH[@]}
+  local folder_lines=() folder_paths=()
+  local active_lines=() active_keys=()
+  local idle_lines=() idle_keys=()
+
+  # `path == ".root"` means "list root-level projects only" — a virtual drill
+  # into the synthetic root bucket. Translate to the real filter: parent==""
+  # AND type==P, skipping any folders.
+  local match_parent root_bucket_mode=0
+  if [[ "$path" == ".root" ]]; then
+    match_parent=""
+    root_bucket_mode=1
+  else
+    match_parent="$path"
+  fi
+
+  # Track presence of folders + projects at top level for the `(root)` bucket
+  # decision. We only care about this when path == "" (true top level).
+  local root_has_folders=0 root_has_projects=0
+
+  for (( i=0; i<n_rows; i++ )); do
+    local p="${TREE_PATH[$i]}"
+    local t="${TREE_TYPE[$i]}"
+    local par="${TREE_PARENT[$i]}"
+    # Skip the synthetic root row itself.
+    [[ "$p" == "." ]] && continue
+    if [[ -z "$path" ]]; then
+      [[ "$par" == "" && "$t" == "F" ]] && root_has_folders=1
+      [[ "$par" == "" && "$t" == "P" ]] && root_has_projects=1
+    fi
+    [[ "$par" != "$match_parent" ]] && continue
+    if (( root_bucket_mode )); then
+      # Root bucket: only show projects, never folders.
+      [[ "$t" != "P" ]] && continue
+    fi
+    local basename="${p##*/}"
+    if [[ "$t" == "F" ]]; then
+      n="${TREE_CHILDREN[$i]}"
+      folder_lines+=("${basename}/  (${n})")
+      folder_paths+=("$p")
+    else
+      _session_activity "$basename"
+      if [[ -n "${ACT_TS:-}" ]]; then
+        active_lines+=("${basename}  [active ${ACT_LABEL}]")
+        active_keys+=("${ACT_TS}"$'\t'"${basename}")
+      else
+        idle_lines+=("${basename}  [idle]")
+        idle_keys+=("${basename}")
+      fi
+    fi
+  done
+
+  # Sort folders alphabetically by basename — emit display lines in basename
+  # order. We sort the parallel arrays via a tagged sort.
+  if (( ${#folder_lines[@]} > 0 )); then
+    local sorted
+    sorted=$(
+      local k
+      for (( k=0; k<${#folder_lines[@]}; k++ )); do
+        printf '%s\t%s\n' "${folder_lines[$k]}" "${folder_paths[$k]}"
+      done | LC_ALL=C sort
+    )
+    while IFS=$'\t' read -r fline fpath; do
+      [[ -z "$fline" ]] && continue
+      PICKER_LINES+=("$fline")
+      PICKER_KIND+=("folder")
+      PICKER_PAYLOAD+=("$fpath")
+    done <<< "$sorted"
+  fi
+
+  # Active projects descending by timestamp, then idle alphabetical.
+  if (( ${#active_lines[@]} > 0 )); then
+    local sorted
+    sorted=$(
+      local k
+      for (( k=0; k<${#active_lines[@]}; k++ )); do
+        printf '%s\t%s\n' "${active_keys[$k]}" "${active_lines[$k]}"
+      done | LC_ALL=C sort -t$'\t' -k1,1nr -k2,2
+    )
+    while IFS=$'\t' read -r _ts _name aline; do
+      # active_keys is "<ts>\t<basename>", so split is 3 fields total
+      [[ -z "${aline:-}" ]] && continue
+      # The basename is the last "  " segment of the line; recover it.
+      local apname="${aline%%  *}"
+      PICKER_LINES+=("$aline")
+      PICKER_KIND+=("project")
+      PICKER_PAYLOAD+=("${match_parent:+$match_parent/}$apname")
+    done <<< "$sorted"
+  fi
+  if (( ${#idle_lines[@]} > 0 )); then
+    local sorted
+    sorted=$(printf '%s\n' "${idle_lines[@]}" | LC_ALL=C sort)
+    while IFS= read -r iline; do
+      [[ -z "$iline" ]] && continue
+      local ipname="${iline%%  *}"
+      PICKER_LINES+=("$iline")
+      PICKER_KIND+=("project")
+      PICKER_PAYLOAD+=("${match_parent:+$match_parent/}$ipname")
+    done <<< "$sorted"
+  fi
+
+  # `(root)` bucket — only at true top level (path == "") and only when both
+  # root folders AND root projects exist.
+  if [[ -z "$path" ]] && (( root_has_folders )) && (( root_has_projects )); then
+    # Count root projects for the (N) annotation.
+    local root_n=0
+    for (( i=0; i<n_rows; i++ )); do
+      [[ "${TREE_TYPE[$i]}" == "P" && "${TREE_PARENT[$i]}" == "" ]] && root_n=$(( root_n + 1 ))
     done
-    if (( DUP )); then
-      echo "  '${NEW_PROJECT_NAME}' already exists. Pick a different name." >&2
+    PICKER_LINES+=("(root)  (${root_n})")
+    PICKER_KIND+=("root_bucket")
+    PICKER_PAYLOAD+=(".root")
+    # When the (root) bucket is shown, the per-project root rows we already
+    # appended above are duplicates — strip them. We do that by rebuilding
+    # the arrays minus the project rows we just added at top level. This
+    # only applies at the true top level.
+    local kept_lines=() kept_kinds=() kept_pls=()
+    for (( i=0; i<${#PICKER_LINES[@]}; i++ )); do
+      if [[ "${PICKER_KIND[$i]}" == "project" && "${PICKER_PAYLOAD[$i]}" != */* ]]; then
+        continue
+      fi
+      kept_lines+=("${PICKER_LINES[$i]}")
+      kept_kinds+=("${PICKER_KIND[$i]}")
+      kept_pls+=("${PICKER_PAYLOAD[$i]}")
+    done
+    PICKER_LINES=("${kept_lines[@]}")
+    PICKER_KIND=("${kept_kinds[@]}")
+    PICKER_PAYLOAD=("${kept_pls[@]}")
+  fi
+
+  PICKER_LINES+=("[new folder here]")
+  PICKER_KIND+=("new_folder")
+  PICKER_PAYLOAD+=("")
+  PICKER_LINES+=("[new project here]")
+  PICKER_KIND+=("new_project")
+  PICKER_PAYLOAD+=("")
+}
+
+# ---- pick_one ----
+# Renders PICKER_LINES via fzf (preferred) or bash select (fallback).
+# Sets globals SELECTED_KIND and SELECTED_PAYLOAD by looking up the picked
+# line's index in PICKER_LINES. Sets SELECTED_KIND=cancel on Ctrl-D / empty.
+pick_one() {
+  SELECTED_KIND=
+  SELECTED_PAYLOAD=
+  local picked=
+  if command -v fzf >/dev/null 2>&1; then
+    if ! picked=$(printf '%s\n' "${PICKER_LINES[@]}" | fzf --prompt='claudehome> ' --height=~50% --reverse); then
+      SELECTED_KIND=cancel
+      return 0
+    fi
+  else
+    local PS3='Select: '
+    select picked in "${PICKER_LINES[@]}"; do
+      [[ -n "${picked:-}" ]] && break
+    done
+    if [[ -z "${picked:-}" ]]; then
+      SELECTED_KIND=cancel
+      return 0
+    fi
+  fi
+  # Look up the index by line.
+  local i
+  for (( i=0; i<${#PICKER_LINES[@]}; i++ )); do
+    if [[ "${PICKER_LINES[$i]}" == "$picked" ]]; then
+      SELECTED_KIND="${PICKER_KIND[$i]}"
+      SELECTED_PAYLOAD="${PICKER_PAYLOAD[$i]}"
+      return 0
+    fi
+  done
+  # No match (shouldn't happen) — treat as cancel.
+  SELECTED_KIND=cancel
+}
+
+# ---- creation flows ----
+# Both prompt_new_folder and prompt_new_project read a basename from stdin,
+# enforce the standard allowlist, and check for collisions. They communicate
+# success via globals (PROMPT_NAME for both; the picker_loop assigns it into
+# PICKER_PROJECT for the new_project case). Returning non-zero would clash
+# with `set -euo pipefail`; instead they set PROMPT_OK to 1 (success) or 0.
+
+# prompt_new_folder $parent_path
+# On success: creates the folder on disk, re-fetches and re-parses the tree,
+# and sets PROMPT_OK=1. On failure: sets PROMPT_OK=0 and re-prompts handled
+# by the caller.
+prompt_new_folder() {
+  local parent=$1
+  local name=
+  PROMPT_OK=0
+  PROMPT_NAME=
+  while :; do
+    if ! read -r -p "New folder name: " name; then
+      return 0
+    fi
+    [[ -z "$name" ]] && return 0
+    if [[ ! "$name" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+      echo "  '${name}' has unsupported characters. Allowed: letters, digits, '.', '_', '-'. Try again." >&2
       continue
     fi
-    PROJECT="$NEW_PROJECT_NAME"
+    # Reject `.`, `..`, and leading-dot names. The allowlist regex permits
+    # them character-wise, but `..` would create the folder above the projects
+    # root, and leading-dot names are filtered by the tree walk so they
+    # disappear from the picker on next launch.
+    if [[ "$name" == "." || "$name" == ".." || "$name" == .* ]]; then
+      echo "  '${name}' is reserved. Pick a different name." >&2
+      continue
+    fi
+    # Sibling collision: any row at the same parent with the same basename,
+    # regardless of type (folder OR project).
+    local i collide=0
+    for (( i=0; i<${#TREE_PATH[@]}; i++ )); do
+      [[ "${TREE_PARENT[$i]}" != "$parent" ]] && continue
+      local ex_basename="${TREE_PATH[$i]##*/}"
+      if [[ "$ex_basename" == "$name" ]]; then
+        collide=1
+        break
+      fi
+    done
+    if (( collide )); then
+      local where="${parent:+$parent/}${name}"
+      echo "  '${name}' already exists at ${where}. Pick a different name." >&2
+      continue
+    fi
+    # Create on disk.
+    local rel="${parent:+$parent/}${name}"
+    if (( LOCAL_MODE )); then
+      mkdir -p "${LOCAL_DIR}/${rel}"
+    else
+      # shellcheck disable=SC2029
+      ssh -o BatchMode=yes -o ConnectTimeout=5 "${REMOTE_USER}@${HOST}" \
+        "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c 'mkdir -p ${PROJECTS_DIR}/${rel}'" >/dev/null 2>&1 || true
+    fi
+    # Re-fetch and re-parse the tree so the new folder is visible in the
+    # next picker render.
+    refetch_tree
+    PROMPT_NAME="$name"
+    PROMPT_OK=1
+    return 0
   done
-else
-  PROJECT="${SELECTED%%  *}"
-fi
+}
 
-# Revalidate the project name with the same allowlist applied to env vars —
-# a malicious or accidental directory name on the Mac mini should not be able
-# to break out of the remote bash -c quoting.
+# prompt_new_project $parent_path
+# On success: sets PROMPT_OK=1 and PROMPT_NAME=<basename>. The caller wires
+# the rest of the attach machinery; mkdir for the project happens at attach
+# time (existing behavior — see L302+ attach branch).
+prompt_new_project() {
+  local parent=$1
+  local name=
+  PROMPT_OK=0
+  PROMPT_NAME=
+  while :; do
+    if ! read -r -p "New project name: " name; then
+      return 0
+    fi
+    [[ -z "$name" ]] && return 0
+    if [[ ! "$name" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+      echo "  '${name}' has unsupported characters. Allowed: letters, digits, '.', '_', '-'. Try again." >&2
+      continue
+    fi
+    if [[ "$name" == "." || "$name" == ".." || "$name" == .* ]]; then
+      echo "  '${name}' is reserved. Pick a different name." >&2
+      continue
+    fi
+    # Sibling collision (same parent, any type).
+    local i collide=0
+    for (( i=0; i<${#TREE_PATH[@]}; i++ )); do
+      [[ "${TREE_PARENT[$i]}" != "$parent" ]] && continue
+      local ex_basename="${TREE_PATH[$i]##*/}"
+      if [[ "$ex_basename" == "$name" ]]; then
+        collide=1
+        break
+      fi
+    done
+    if (( collide )); then
+      local where="${parent:+$parent/}${name}"
+      echo "  '${name}' already exists at ${where}. Pick a different name." >&2
+      continue
+    fi
+    # Globally-unique scan: any P-type row anywhere in the tree with the
+    # same basename. Cite the conflicting full path.
+    local conflict=
+    for (( i=0; i<${#TREE_PATH[@]}; i++ )); do
+      [[ "${TREE_TYPE[$i]}" != "P" ]] && continue
+      local ex_basename="${TREE_PATH[$i]##*/}"
+      if [[ "$ex_basename" == "$name" ]]; then
+        conflict="${TREE_PATH[$i]}"
+        break
+      fi
+    done
+    if [[ -n "$conflict" ]]; then
+      echo "  '${name}' already exists at ${conflict}. Pick a different name." >&2
+      continue
+    fi
+    PROMPT_NAME="$name"
+    PROMPT_OK=1
+    return 0
+  done
+}
+
+# refetch_tree
+# Re-runs the tree-walk emitter and re-parses TREE_* arrays. Used after a
+# folder creation so the new folder is visible in the next picker render.
+# Performance note: a re-fetch is one local find or one SSH round-trip; the
+# user already paid for one tree walk on startup, so a second one after
+# folder creation is acceptable.
+refetch_tree() {
+  local fresh
+  if (( LOCAL_MODE )); then
+    fresh=$(
+      {
+        echo ---TREE---
+        ( cd "$LOCAL_DIR" 2>/dev/null && {
+            total=$(find . -maxdepth 8 -type d ! -path '*/.*' 2>/dev/null | wc -l | tr -d ' ')
+            deeper=$(find . -mindepth 9 -type d ! -path '*/.*' 2>/dev/null | head -n 1)
+            i=0
+            find . -maxdepth 8 -type d ! -path '*/.*' -print0 2>/dev/null \
+              | while IFS= read -r -d '' p; do
+                  i=$(( i + 1 ))
+                  [ "$i" -gt 2000 ] && break
+                  rel="${p#./}"
+                  [ "$p" = "." ] && rel="."
+                  n_all=0; n_dirs=0
+                  for c in "$p"/* "$p"/.[!.]* "$p"/..?* ; do
+                    [ -e "$c" ] || continue
+                    n_all=$(( n_all + 1 ))
+                    [ -d "$c" ] && n_dirs=$(( n_dirs + 1 ))
+                  done
+                  if [ "$rel" = "." ]; then
+                    t=R
+                  elif [ "$n_all" -gt 0 ] && [ "$n_all" = "$n_dirs" ]; then
+                    t=F
+                  else
+                    t=P
+                  fi
+                  printf '%s\t%s\t%s\n' "$rel" "$t" "$n_all"
+                done
+            [ "$total" -gt 2000 ] && echo ---TRUNCATED---
+            [ -n "$deeper" ] && echo ---DEPTH-TRUNCATED---
+          } )
+        echo ---TMUX---
+        tmux list-sessions -F "#{session_name} #{session_activity}" 2>/dev/null || true
+      }
+    )
+  else
+    # shellcheck disable=SC2029
+    fresh=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "${REMOTE_USER}@${HOST}" "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c '
+      cd ${PROJECTS_DIR} 2>/dev/null || exit 0
+      echo ---TREE---
+      total=\$(find . -maxdepth 8 -type d ! -path \"*/.*\" 2>/dev/null | wc -l | tr -d \" \")
+      deeper=\$(find . -mindepth 9 -type d ! -path \"*/.*\" 2>/dev/null | head -n 1)
+      i=0
+      find . -maxdepth 8 -type d ! -path \"*/.*\" -print0 2>/dev/null \
+        | while IFS= read -r -d \"\" p; do
+            i=\$(( i + 1 ))
+            [ \"\$i\" -gt 2000 ] && break
+            rel=\"\${p#./}\"
+            [ \"\$p\" = \".\" ] && rel=\".\"
+            n_all=0; n_dirs=0
+            for c in \"\$p\"/* \"\$p\"/.[!.]* \"\$p\"/..?* ; do
+              [ -e \"\$c\" ] || continue
+              n_all=\$(( n_all + 1 ))
+              [ -d \"\$c\" ] && n_dirs=\$(( n_dirs + 1 ))
+            done
+            if [ \"\$rel\" = \".\" ]; then
+              t=R
+            elif [ \"\$n_all\" -gt 0 ] && [ \"\$n_all\" = \"\$n_dirs\" ]; then
+              t=F
+            else
+              t=P
+            fi
+            printf \"%s\\t%s\\t%s\\n\" \"\$rel\" \"\$t\" \"\$n_all\"
+          done
+      [ \"\$total\" -gt 2000 ] && echo ---TRUNCATED---
+      [ -n \"\$deeper\" ] && echo ---DEPTH-TRUNCATED---
+      echo ---TMUX---
+      tmux list-sessions -F \"#{session_name} #{session_activity}\" 2>/dev/null || true
+    '" 2>/dev/null) || {
+      echo "claudehome: tree refresh failed; using cached view" >&2
+      return 0
+    }
+  fi
+  # Re-parse into TREE_* arrays.
+  local body="${fresh#*---TREE---}"
+  body="${body%%---TMUX---*}"
+  TMUX_BLOCK="${fresh#*---TMUX---}"
+  TREE_PATH=()
+  TREE_TYPE=()
+  TREE_CHILDREN=()
+  TREE_PARENT=()
+  while IFS= read -r row; do
+    [[ -z "$row" ]] && continue
+    case "$row" in
+      '---TRUNCATED---'|'---DEPTH-TRUNCATED---') continue ;;
+    esac
+    IFS=$'\t' read -r tp tt tc <<< "$row"
+    [[ -z "${tp:-}" || -z "${tt:-}" ]] && continue
+    [[ ! "$tt" =~ ^[RFP]$ ]] && continue
+    if [[ "$tp" != "." && ! "$tp" =~ ^([a-zA-Z0-9._-]+/)*[a-zA-Z0-9._-]+$ ]]; then
+      continue
+    fi
+    if [[ "$tp" == "." ]]; then
+      parent=""
+    elif [[ "$tp" == */* ]]; then
+      parent="${tp%/*}"
+    else
+      parent=""
+    fi
+    TREE_PATH+=("$tp")
+    TREE_TYPE+=("$tt")
+    TREE_CHILDREN+=("${tc:-0}")
+    TREE_PARENT+=("$parent")
+  done <<< "$body"
+}
+
+# ---- picker_loop(path) ----
+# Recursive drill loop. Communicates with the dispatcher via globals
+# PICKER_RESULT ("" or "attach"), PICKER_PROJECT (basename), PICKER_PARENT
+# (parent path or "" for root).
+#
+# Why globals not return codes: under `set -euo pipefail` (line 5), a non-zero
+# return from a bare function call aborts the script before any `case "$?"`
+# could read it. Globals sidestep the errexit gate without disabling it.
+PICKER_RESULT=
+PICKER_PROJECT=
+PICKER_PARENT=
+
+picker_loop() {
+  local path=$1
+  while :; do
+    build_rows_for_path "$path"
+    pick_one
+    case "$SELECTED_KIND" in
+      back)
+        return 0 ;;
+      cancel)
+        return 0 ;;
+      folder)
+        picker_loop "$SELECTED_PAYLOAD"
+        [[ "${PICKER_RESULT:-}" == "attach" ]] && return 0
+        ;;
+      root_bucket)
+        picker_loop ".root"
+        [[ "${PICKER_RESULT:-}" == "attach" ]] && return 0
+        ;;
+      project)
+        # SELECTED_PAYLOAD is the full path; split into parent + basename.
+        local full="$SELECTED_PAYLOAD"
+        if [[ "$full" == */* ]]; then
+          PICKER_PARENT="${full%/*}"
+        else
+          PICKER_PARENT=""
+        fi
+        PICKER_PROJECT="${full##*/}"
+        PICKER_RESULT=attach
+        return 0 ;;
+      new_folder)
+        prompt_new_folder "$path"
+        # Stay at this level; the next loop iteration re-renders with the
+        # new folder visible (or unchanged on validation failure).
+        ;;
+      new_project)
+        prompt_new_project "$path"
+        if (( ${PROMPT_OK:-0} )); then
+          # `path == ".root"` means "root projects view" — the actual parent
+          # for a project created here is "" (true root), not ".root".
+          if [[ "$path" == ".root" ]]; then
+            PICKER_PARENT=""
+          else
+            PICKER_PARENT="$path"
+          fi
+          PICKER_PROJECT="$PROMPT_NAME"
+          PICKER_RESULT=attach
+          return 0
+        fi
+        ;;
+    esac
+  done
+}
+
+# ---- top-level dispatch ----
+picker_loop ""
+[[ "${PICKER_RESULT:-}" == "attach" ]] || exit 0
+
+PROJECT="$PICKER_PROJECT"
+ATTACH_PATH="$PICKER_PARENT"
+
+# Defense-in-depth: revalidate the basename and the parent path against the
+# same allowlists we apply to env vars. The basename can only contain the
+# characters from the allowlist (the picker enforces that), but defense in
+# depth is cheap.
 if [[ ! "$PROJECT" =~ ^[a-zA-Z0-9._-]+$ ]]; then
   echo "claudehome: project directory '${PROJECT}' has characters that cannot be safely passed to SSH." >&2
   echo "  Rename it on ${HOST} to use only letters, digits, '.', '_', '-'." >&2
   exit 1
 fi
+if [[ -n "$ATTACH_PATH" && ! "$ATTACH_PATH" =~ ^([a-zA-Z0-9._-]+/)*[a-zA-Z0-9._-]+$ ]]; then
+  echo "claudehome: parent path '${ATTACH_PATH}' has characters that cannot be safely passed to SSH." >&2
+  exit 1
+fi
 
 # ---- attach (or create) tmux session, launch claude, keep shell on exit ----
-# Session is eternal; `claude; exec $SHELL` drops to a shell when claude
-# exits so you can relaunch in place without a new tmux session.
+# Session name is `claudehome-<basename>` regardless of folder depth — the
+# folder is invisible at the tmux layer (AC-FT3, spec "Project naming").
 #
 # `-A` means: attach if exists, create otherwise. We deliberately omit `-D`
-# so multiple clients can stay attached to the same session simultaneously
-# — walk from PC to MacBook to phone and all views stay live. Tmux sizes the
-# window to the most-recently-active client, so reflow follows wherever you
-# typed last.
+# so multiple clients can stay attached to the same session simultaneously.
 #
 # `mkdir -p` is idempotent: a no-op for existing projects, and creates the
-# directory (and the projects root if missing) for newly-named ones picked
-# via the `[new project]` prompt.
+# directory (and any missing parent folders) for newly-named ones.
 if (( LOCAL_MODE )); then
-  mkdir -p "${LOCAL_DIR}/${PROJECT}"
-  exec tmux new-session -A -s "claudehome-${PROJECT}" -c "${LOCAL_DIR}/${PROJECT}" "claude; exec $SHELL"
+  mkdir -p "${LOCAL_DIR}/${ATTACH_PATH:+$ATTACH_PATH/}${PROJECT}"
+  exec tmux new-session -A -s "claudehome-${PROJECT}" -c "${LOCAL_DIR}/${ATTACH_PATH:+$ATTACH_PATH/}${PROJECT}" "claude; exec $SHELL"
 else
   # shellcheck disable=SC2029
   exec ssh -t "${REMOTE_USER}@${HOST}" "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c '
-    mkdir -p ${PROJECTS_DIR}/${PROJECT}
-    tmux new-session -A -s claudehome-${PROJECT} -c ${PROJECTS_DIR}/${PROJECT} \"claude; exec \$SHELL\"
+    mkdir -p ${PROJECTS_DIR}/${ATTACH_PATH:+$ATTACH_PATH/}${PROJECT}
+    tmux new-session -A -s claudehome-${PROJECT} -c ${PROJECTS_DIR}/${ATTACH_PATH:+$ATTACH_PATH/}${PROJECT} \"claude; exec \$SHELL\"
   '"
 fi
