@@ -91,6 +91,8 @@ Run at the mini directly (Terminal.app):
    ```
    Symlinks the `claudehome` CLI into the mini's PATH and writes `CLAUDEHOME_LOCAL=1` to `~/.claudehomerc`. Lets you SSH into the mini (e.g., from iPhone Termius) and type `claudehome` to get the picker locally — no loopback SSH.
 
+   Also writes `~/Library/LaunchAgents/com.${USER}.tmux-server.plist` so the mini's tmux server starts in the GUI (Aqua) securityd session at next login. This restores macOS Keychain access for claudehome panes — Python `keyring`, `security` CLI, `git credential-osxkeychain`, iCloud auth, etc. Without it, panes inherit the SSH securityd and Keychain reads fail with `errSecInteractionNotAllowed`. The plist auto-loads on next GUI login (or reboot); to activate immediately, kill any existing tmux server (`tmux kill-server`) and reboot.
+
 ---
 
 ### 2. Tailscale admin console
@@ -377,7 +379,7 @@ ssh <mini-host> 'tmux kill-session -t claudehome-<project-name>'
 - Session management subcommands (`ls`, `kill`, `attach <name>`)
 - Automatic cleanup of orphaned sessions
 - Multi-user or shared Mac mini
-- Server-side bootstrap script (mini setup is manual per §1)
+- Server-side bootstrap script beyond the tmux-server LaunchAgent (mini setup is otherwise manual per §1; the LaunchAgent is the lone exception, justified by macOS Keychain audit-session inheritance)
 
 ---
 

@@ -200,6 +200,87 @@ else
   echo "  Numbered menu will be used. To enable arrow-key picker: brew install fzf"
 fi
 
+# ── Step 9: tmux LaunchAgent (macOS Keychain access fix) ─────────────────────
+# Why this exists: macOS binds Keychain access to the GUI (Aqua) securityd
+# session. When the tmux server is first started inside an SSH session, every
+# pane it spawns inherits the SSH securityd, and tools that read Keychain
+# (Python keyring, security CLI, git credential-osxkeychain, iCloud frameworks)
+# fail with errSecInteractionNotAllowed.
+#
+# This LaunchAgent pre-starts a tmux server in the Aqua session at GUI login,
+# so future `tmux new-session -A` attaches to the GUI-sessioned server and
+# panes inherit Aqua securityd → Keychain works.
+#
+# We only WRITE the plist here. We do NOT `launchctl load` it: that would load
+# it into whatever launchd domain this script is running in (typically the SSH
+# domain when run from a remote shell), defeating the purpose. The plist
+# auto-loads on next GUI login.
+#
+# Spec: AC-LOCAL4 in .omc/specs/deep-interview-claudehome-v1.md
+# Diagnosis: .omc/keychain-tmux-handoff.md
+echo ""
+echo "── tmux LaunchAgent (Keychain access for panes) ───────────────────────────"
+TMUX_BIN="$(command -v tmux 2>/dev/null || echo /opt/homebrew/bin/tmux)"
+LA_LABEL="com.${USER}.tmux-server"
+LA_DIR="${HOME}/Library/LaunchAgents"
+LA_PATH="${LA_DIR}/${LA_LABEL}.plist"
+LA_LOG="${HOME}/Library/Logs/tmux-bootstrap.log"
+mkdir -p "$LA_DIR"
+
+cat > "$LA_PATH" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${LA_LABEL}</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>${TMUX_BIN}</string>
+    <string>new-session</string>
+    <string>-d</string>
+    <string>-s</string>
+    <string>bootstrap</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>${LA_LOG}</string>
+
+  <key>StandardErrorPath</key>
+  <string>${LA_LOG}</string>
+</dict>
+</plist>
+EOF
+
+if plutil -lint "$LA_PATH" >/dev/null 2>&1; then
+  echo "install: wrote ${LA_PATH}"
+  echo "install: plutil validated ✓"
+  echo ""
+  echo "  Why: macOS Keychain access requires the GUI (Aqua) securityd session."
+  echo "       Without this, claudehome panes inherit the SSH securityd and"
+  echo "       tools like Python keyring, 'security' CLI, and iCloud auth fail"
+  echo "       with errSecInteractionNotAllowed."
+  echo ""
+  echo "  Activation (the plist does not auto-load from this shell):"
+  echo "    The plist auto-loads on next GUI login. To activate now:"
+  echo "      1. Reboot the mini, OR log out and back in on its desktop"
+  echo "         (Screen Sharing also counts as a GUI login)."
+  echo "      2. Any pre-existing SSH-sessioned tmux server must die first —"
+  echo "         'tmux kill-server' (kills all sessions) or just reboot."
+  echo "  Verify after activation:"
+  echo "      tmux show-env -g | grep -i ssh    # prints nothing"
+else
+  echo "install: WARNING — ${LA_PATH} failed plist validation; removing." >&2
+  rm -f "$LA_PATH"
+fi
+
 # ── Smoke test + summary ─────────────────────────────────────────────────────
 echo ""
 if "$LINK" --help >/dev/null 2>&1; then

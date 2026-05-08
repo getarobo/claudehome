@@ -15,7 +15,7 @@ Each client (`bin/claudehome` on Mac, `bin/claudehome.ps1` on Windows) loads con
 - **Main script (Mac):** `bin/claudehome` (bash, ~310 lines).
 - **Main script (Windows):** `bin/claudehome.ps1` (pwsh 7+, ~228 lines) + `bin/claudehome.cmd` shim.
 - **Installer (Mac client):** `install_client.sh` — symlinks CLI, runs setup wizard (Tailscale check, host/user prompts, optional fzf), writes `~/.claudehomerc`.
-- **Installer (Mac server / local mode):** `install_server.sh` — symlinks CLI on the mini itself for local-mode use (skip Tailscale check, skip ssh-copy-id guidance, write `CLAUDEHOME_LOCAL=1`). Used when SSH'd into the mini from another device (iPhone Termius/Blink) and you want `claudehome` to run the picker locally with no loopback SSH. Does **not** install tmux, claude, or Tailscale — those stay manual per README §1.
+- **Installer (Mac server / local mode):** `install_server.sh` — symlinks CLI on the mini itself for local-mode use (skip Tailscale check, skip ssh-copy-id guidance, write `CLAUDEHOME_LOCAL=1`). Used when SSH'd into the mini from another device (iPhone Termius/Blink) and you want `claudehome` to run the picker locally with no loopback SSH. Does **not** install tmux, claude, or Tailscale — those stay manual per README §1. Also writes `~/Library/LaunchAgents/com.${USER}.tmux-server.plist` so the mini's tmux server starts in the Aqua securityd session at GUI login (macOS Keychain access for panes — see spec AC-LOCAL4).
 - **Installer (Windows):** `install_client.ps1` — adds `<repo>\bin` to user PATH, runs setup wizard, writes `~/.claudehomerc`.
 - **Config file:** `~/.claudehomerc` — KEY=VALUE format, written by installers. Env vars take precedence.
 - **Lint (Mac):** `shellcheck bin/claudehome install_client.sh`.
@@ -29,12 +29,12 @@ The following are explicit non-goals — **do not add them** without updating th
 
 - Subcommands beyond `--help` (`ls`, `kill`, `attach <name>`, `new <name>`) — to create a project, use the in-picker `[new project]` option (AC13–AC18). The CLI surface stays at `claudehome` / `claudehome --help`; no extra args.
 - Config files beyond `~/.claudehomerc`; that single dotfile is the only allowed config file
-- Daemons, background workers, persistent state files, or anything outside plain tmux
+- Daemons, background workers, persistent state files, or anything outside plain tmux *(carve-out: the tmux-server LaunchAgent installed by `install_server.sh` is the one allowed exception, justified by macOS Keychain audit-session inheritance — see spec AC-LOCAL4. The agent does no work beyond `tmux new-session -d`.)*
 - iPhone / web clients
 - Packaging (npm, Homebrew formula, Docker, systemd, PowerShell Gallery, winget manifest)
 - `install_client.ps1 --system` / machine-wide install on Windows. (The bash `install_client.sh` and `install_server.sh` do support `--system` — the non-goal is PowerShell-specific.)
 - PowerShell 5.1 support (pwsh 7+ only for the Windows client)
-- Server-side bootstrap (mini setup remains manual per README)
+- Server-side bootstrap (mini setup remains manual per README) *(except the tmux-server LaunchAgent in `install_server.sh` — see the daemon non-goal carve-out above)*
 
 iPhone access is solved via any iOS SSH app (Termius, Blink) + Tailscale + the mini's local-mode CLI (`install_server.sh`). A native iOS client is intentionally not pursued — do not propose one.
 

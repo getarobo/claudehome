@@ -133,6 +133,18 @@ When SSH'd into the mini from another device (iPhone Termius/Blink, etc.), runni
 - [ ] **AC-LOCAL2** — Picker output in local mode is byte-identical in shape to remote mode: same recency ordering, same `[active <age>]`/`[idle]` annotations, `[new project]` always last, allowlist + duplicate-name guards still applied.
 - [ ] **AC-LOCAL3** — `CLAUDEHOME_LOCAL=0` forces the remote-SSH path even when running on the mini (loopback test). `CLAUDEHOME_LOCAL=1` forces local mode even when `CLAUDEHOME_HOST` doesn't auto-resolve to local — manual override.
 
+### Amendment 2026-05-08: tmux-server LaunchAgent for Keychain access (AC-LOCAL4)
+
+`install_server.sh` writes `~/Library/LaunchAgents/com.${USER}.tmux-server.plist` (the file is removed if `plutil -lint` rejects it). The agent runs `tmux new-session -d -s bootstrap` at GUI login, ensuring the persistent tmux server on the mini lives in the Aqua securityd session. This restores macOS Keychain access (Python `keyring`, `security` CLI, `git credential-osxkeychain`, iCloud frameworks, etc.) inside every claudehome pane.
+
+Without this, the first SSH-spawned `tmux new-session` becomes the persistent server, every pane it spawns inherits the SSH securityd, and Keychain reads fail with `errSecInteractionNotAllowed`. Diagnosed in `.omc/keychain-tmux-handoff.md` (2026-05-08).
+
+The installer **writes** the plist but does **not** `launchctl load` it: loading from an SSH shell binds the agent to the SSH launchd domain, which defeats the purpose. Activation happens automatically on next GUI login (or reboot); pre-existing SSH-sessioned tmux servers must be killed first (`tmux kill-server` or reboot) for the new GUI-sessioned server to take over the default socket.
+
+This is a **deliberate, narrowly-scoped exception** to the v1 non-goal "Any daemon, background agent, or persistent state on either side beyond tmux itself" (L103) and to the README non-goal "Server-side bootstrap script (mini setup is manual per §1)". The LaunchAgent's sole purpose is to start tmux in the correct securityd session — it is structurally a tmux launcher, not a separate daemon, and runs no work beyond `tmux new-session -d`.
+
+- [ ] **AC-LOCAL4** — After running `install_server.sh` on the mini and rebooting (or GUI re-login with any prior tmux server killed), in any new claudehome pane: (a) `tmux show-env -g | grep -i ssh` prints **nothing**; (b) `security find-generic-password -s <existing-keychain-item> -w` returns the secret rather than `errSecInteractionNotAllowed`; (c) `~/Library/LaunchAgents/com.${USER}.tmux-server.plist` exists and validates with `plutil -lint`. Re-running `install_server.sh` is idempotent — the plist is overwritten with the same content.
+
 ### Amendment 2026-05-06: config file (`~/.claudehomerc`)
 
 Since v1.0.1.0 the install scripts (`install_client.sh`, `install_client.ps1`, `install_server.sh`) write a `KEY=VALUE` config file at `~/.claudehomerc` and the clients parse it on startup. This supersedes the original "env vars only, no config file in v1" wording in §Configuration (L65), the "Config file, YAML/TOML settings" non-goal (L101), the "No config files" trade-off line (L144), and the "no config file" clause inside AC10. Amended rules:
