@@ -5,6 +5,51 @@ All notable changes to `claudehome` are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses 4-part versioning: `MAJOR.MINOR.BUILD.REVISION`.
 
+## [1.3.0.0] - 2026-05-08
+
+### Added
+- **5-type structural classification** (`Folder`, `Suite`, `Project`, `Hub`, `Member`) replacing folder-tree-v1's binary heuristic. Each directory is exactly one type, computed from three signals: presence of `CLAUDE.md`, basename suffix (`_suite`/`_hub`), and Suite ancestor. Folders/Suites drill; Projects/Hubs/Members attach. Picker shows `<name>/  (N)` for Folder/Suite, `<name>  [active/idle]` for Project, `<name>_hub  HUB  [active/idle]` for Hub, `<name>  member  [active/idle]` for Member.
+- **Single `[new...]` picker row** with context-aware type prompt (root → folder/suite/project; Folder → folder/project; Suite-no-Hub → folder/member/hub; Suite-with-Hub → folder/member; sub-Folder inside Suite → folder/member). Replaces the separate `[new folder here]`/`[new project here]` rows from folder-tree-v1.
+- **Hub-aware scaffolding** for Members in a Suite-with-Hub: the new Member gets `git init` + a `CLAUDE.md` with `@<hub-abs>/README.md` import + appended row in `<hub>/projects.md`. A description prompt fires only in this case.
+- **Auto-suffix policy** for Suite/Hub names: prefix-only input auto-appends `_suite`/`_hub`; names already containing the substring anywhere (e.g., `gene-mini_suite_v2`) are rejected with a clear stderr message.
+- **`warn()` / `Write-WarnStderr` helpers** defined near the top of each client. Always succeed (return 0 / no-op) so they're safe under `set -euo pipefail` and `$ErrorActionPreference = 'Stop'`.
+
+### Changed
+- **Heuristic flipped** from "every immediate child is a directory → Folder" to `[ -f $p/CLAUDE.md ]`. 10 of the user's 14 existing flat projects (those without `CLAUDE.md`) flip to Folder on upgrade. Recovery is one idempotent line documented in CLAUDE.md "Migrating to 5-type v1": `for d in ~/projects/claudehome-projects/*/; do [ -d "$d" ] && [ ! -f "$d/CLAUDE.md" ] && touch "$d/CLAUDE.md"; done`.
+- **Wire format** widened from `R/F/P` (3 type codes) to `R/F/S/P/H/M` (6 codes). Server emits 4 codes (`R/F/S/P`); the client parser synthesizes Hub and Member from P rows via path-string ancestor walk. Parser regex widened to `^[RFSPHM]$`.
+
+### Removed
+- **`(root)` synthetic bucket** is gone. Top-level picker shows folders/suites and root-level projects flat in one screen, ordered: folders/suites alphabetical → projects/hubs/members active-first then idle alphabetical → `[new...]`. The `[..  back]` row only appears at non-root drill levels.
+
+### Security
+- **CRITICAL — RCE in description channel, fixed.** The free-text description for new Members was interpolated raw into the outer `bash -c '...'` SSH command. A single quote in the description (e.g. `hello'; touch /tmp/PWN; echo '`) closed the outer quote and allowed arbitrary command execution on the mini under the SSH user. Added `_sq_escape` helper (`'` → `'\''`) applied to description and pipe-escaped description in both clients. PowerShell also gained a quoted `<<'CLAUDEMD_EOF'` heredoc to prevent remote `$()`/backtick expansion inside the CLAUDE.md body. Caught by the autopilot Phase-4 security reviewer; verified neutralized via PoC. Allowlist-protected fields (project/hub/member names, hub-abs path) were never vulnerable.
+
+### Documentation
+- **5-type spec** (`.omc/specs/deep-interview-claudehome-5type-v1.md`): 36 testable AC (20 Mac AC-5T1..AC-5T20, 14 PC AC-5T-PC1..AC-5T-PC14, 2 LOCAL AC-5T-LOCAL1..AC-5T-LOCAL2). Produced via deep-interview at 13.3% ambiguity (PASSED).
+- **5-type plan** (`.omc/plans/claudehome-5type-v1-plan.md`, ~1050 lines): 2 ralplan consensus iterations, both Architect and Critic APPROVED.
+- **Subsumed:** `.omc/specs/deep-interview-claudehome-hub-aware-v1.md` and `.omc/plans/claudehome-hub-aware-v1-plan.md` — earlier hub-aware-only proposal (used `_pjt` suffix). Folded into the 5-type spec; legacy `*_pjt/` directories are not recognized by the new code (classify as plain Folders); rename to `*_suite/` to opt in.
+- **CLAUDE.md** updated: Architecture paragraph rewritten for 5-type model; line counts updated to ~1400 bash / ~960 pwsh; Key docs gain the 5-type spec/plan; Windows post-install verification adds AC-5T-PC1..PC14; new "Migrating to 5-type v1" section with the recovery one-liner and `_pjt` deprecation note.
+
+### Operations
+- Three-stage pipeline (deep-interview → ralplan → autopilot) drove the entire change. Critic caught 4 critical patches (auto-suffix substring rejection, undefined `warn()` under `set -e`, fixture regenerate vs extend, AC count discrepancy) in iteration 1; iteration 2 approved cleanly. Autopilot Phase-4 security review caught the description-channel RCE before it shipped.
+
+## [1.2.0.0] - 2026-05-08
+
+### Added
+- **Folder-tree v1: drill-down picker over arbitrary nesting.** Replaces the flat `ls -1` discovery in `bin/claudehome` and `bin/claudehome.ps1` with a single-SSH-roundtrip tree-walk emitter and a recursive drill-down picker. New wire format: `---TREE---<path TAB type TAB child_count rows>---TMUX---<sessions>` with `---TRUNCATED---` (>2000 entries) and `---DEPTH-TRUNCATED---` (>8 levels) sentinels surfaced as stderr warnings client-side. Folders organize projects on disk; tmux session names stay `claudehome-<basename>` regardless of folder depth.
+- **`[new folder here]` and `[new project here]` rows** in the picker, available at every drill level. `[..  back]` row at row 1 of every non-root drill. Synthetic `(root)` bucket appears at top-level only when both folders and root projects coexist.
+- **Globally-unique project names** across the entire tree. Sibling collision check at the prompt; full-tree scan also enforced. Reserved names `.`, `..`, and leading-dot rejected at the prompt (these would either escape the projects root or be filtered by the emitter's hidden-path exclusion, surprising the user on next launch).
+- **Wire-format invariant enforcement** in the parser (allowlist regex + type-validity check). A directory with TAB/newline/non-allowlist characters in its name is silently dropped with a single deduped stderr warning per session, instead of corrupting the parse.
+
+### Changed
+- **Bash drill-down state machine** uses globals (`PICKER_RESULT`, `PICKER_PROJECT`, `PICKER_PARENT`) to signal between picker frames, NOT non-zero return codes. Required because `set -euo pipefail` aborts on any non-zero return from a function call before a `case "$?"` can read it (verified empirically during ralplan consensus iter-1). PowerShell uses the discriminated-object form (no `set -e` constraint).
+- **Truncation handling:** `awk -v RS='\0' -v ORS='\0' 'NR<=2000'` is broken on macOS BWK awk (consumes the entire NUL-stream as one record). Replaced with a portable bash counter `i=$((i+1)); [ "$i" -gt 2000 ] && break` inside the `while read -r -d ''` loop. The `total=$(find ... \| wc -l)` pre-walk count + `---TRUNCATED---` sentinel emission unchanged → R1 mitigation preserved.
+
+### Documentation
+- **Folder-tree v1 spec** (`.omc/specs/deep-interview-claudehome-folder-tree-v1.md`): 24 AC (12 Mac AC-FT1..AC-FT12, 10 PC AC-FT-PC1..AC-FT-PC10, 2 LOCAL AC-FT-LOCAL1..AC-FT-LOCAL2). Deep-interview, 14% ambiguity (PASSED).
+- **Folder-tree v1 plan** (`.omc/plans/claudehome-folder-tree-v1-plan.md`, 685 lines): 2 ralplan consensus iterations APPROVED.
+- **CLAUDE.md** Architecture paragraph updated for drill-down + globally-unique naming; Windows post-install verification gained AC-FT-PC1..PC10.
+
 ## [1.1.0.0] - 2026-05-08
 
 ### Added
