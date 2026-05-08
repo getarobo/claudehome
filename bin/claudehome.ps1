@@ -6,6 +6,13 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandArgumentPassing = 'Standard'          # consistent arg-passing on pwsh 7.0–7.6
 $PSNativeCommandUseErrorActionPreference = $false     # allows native commands to write stderr without triggering a terminating error under Stop
 
+# Force UTF-8 on the console and on bytes exchanged with native processes (ssh.exe).
+# Without this, Korean (and any non-ASCII) project names and tmux/claude output
+# get mangled by the legacy OEM/ANSI codepage before WezTerm ever sees them.
+$OutputEncoding           = [System.Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+[Console]::InputEncoding  = [System.Text.UTF8Encoding]::new($false)
+
 # ---- help ----
 if ($args.Count -ge 1 -and $args[0] -in @('-h', '--help')) {
     @'
@@ -78,7 +85,7 @@ if ($ProjectsDir -notmatch $rxPath) { Die "claudehome: CLAUDEHOME_PROJECTS_DIR='
 # Single-quoted here-string + .Replace() avoids both PS $-interpolation and the
 # -f operator's FormatException on tmux's #{session_name} format tokens.
 $remoteDataTpl = @'
-bash --norc --noprofile -c '
+LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c '
   ls -1 __PROJECTS_DIR__ 2>/dev/null || true
   echo ---TMUX---
   tmux list-sessions -F "#{session_name} #{session_activity}" 2>/dev/null || true
@@ -216,7 +223,7 @@ if ($project -notmatch $rxProj) {
 # `mkdir -p` is idempotent: a no-op for existing projects, and creates the
 # directory (and the projects root if missing) for newly-named ones.
 $attachTpl = @'
-bash --norc --noprofile -c '
+LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c '
   mkdir -p __PROJECTS_DIR__/__PROJECT__
   tmux new-session -A -s claudehome-__PROJECT__ -c __PROJECTS_DIR__/__PROJECT__ "claude; exec $SHELL"
 '
