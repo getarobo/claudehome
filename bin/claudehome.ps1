@@ -748,11 +748,18 @@ CLAUDEMD_EOF
 }
 
 # ---- Read-TypeChoice ----
-# Reads a creation-type choice from stdin. Accepts substring prefix matches
-# (e.g., `f` → `folder`); ambiguous prefix re-prompts. Empty input/Ctrl-D
-# returns ''. Mirrors bash _read_type_choice.
+# Pick a creation-type from a list. Prefers fzf arrow-key picker when fzf.exe
+# is on PATH; falls back to Read-Host typed prompt with substring-prefix
+# matching when not. Empty/Ctrl-C returns ''. Mirrors bash _read_type_choice.
 function Read-TypeChoice {
     param([string[]]$ValidTypes)
+    $fzf = Get-Command fzf.exe -ErrorAction SilentlyContinue
+    if ($fzf) {
+        $picked = ($ValidTypes -join "`n") | & fzf.exe --prompt='Create what? > ' --height=~30% --reverse --no-info
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($picked)) { return '' }
+        return $picked.Trim()
+    }
+    # Fallback (no fzf): typed prompt with full-word OR unique-prefix match.
     $valid = $ValidTypes -join ' '
     while ($true) {
         $answer = Read-Host "Create what? [$valid]"

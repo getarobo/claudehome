@@ -1012,12 +1012,22 @@ _hub_aware_writes() {
   fi
 }
 
-# _read_type_choice <valid_types> — read a creation-type choice from stdin.
-# Accepts substring matches (e.g. `f` → `folder`). Sets RES_TYPE on accept;
-# empty/Ctrl-D sets RES_TYPE="".
+# _read_type_choice <valid_types> — pick a creation-type from a space-
+# separated list. Prefers an fzf arrow-key picker when fzf is on PATH;
+# falls back to a typed prompt with substring-prefix matching when not.
+# Sets RES_TYPE on accept; empty/Ctrl-C/Ctrl-D sets RES_TYPE="".
 _read_type_choice() {
   local valid_types=$1
   RES_TYPE=
+  if command -v fzf >/dev/null 2>&1; then
+    local picked
+    # shellcheck disable=SC2086 # word-splitting on $valid_types is intentional
+    picked=$(printf '%s\n' $valid_types | fzf --prompt='Create what? > ' --height=~30% --reverse --no-info) || return 0
+    [[ -z "$picked" ]] && return 0
+    RES_TYPE="$picked"
+    return 0
+  fi
+  # Fallback (no fzf): typed prompt with full-word OR unique-prefix match.
   local input
   while :; do
     if ! read -r -p "Create what? [$valid_types]: " input; then
@@ -1026,7 +1036,6 @@ _read_type_choice() {
     if [[ -z "$input" ]]; then
       return 0
     fi
-    # Match against valid types as full word OR unique substring prefix.
     local matched=
     local v
     for v in $valid_types; do
