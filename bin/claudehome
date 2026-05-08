@@ -4,6 +4,10 @@
 
 set -euo pipefail
 
+# warn <message...> — print prefixed warning to stderr, return 0.
+# Defined early so all helpers can use it. Always succeeds; safe under set -e.
+warn() { echo "claudehome: $*" >&2; return 0; }
+
 # ---- help ----
 if [[ "${1:-}" =~ ^(-h|--help)$ ]]; then
   cat <<'USAGE'
@@ -17,12 +21,12 @@ Usage: claudehome
   with CLAUDEHOME_LOCAL=1), the SSH layer is skipped and the picker plus
   attach run locally — useful when SSH'd into the mini from iPhone, etc.
 
-  Folders organize projects in a drill-down picker — pick [new folder here]
-  to create one. Project names are globally unique across the whole tree;
-  tmux sessions are named claudehome-<basename> regardless of folder depth.
-  The last picker row is [new project here] — pick it to create a fresh
-  project at the current drill level. Names are validated against the same
-  allowlist applied to env vars; duplicates are refused.
+  5-type structure: Folders organize, Suites group masterplan workspaces
+  (*_suite), Projects/Hubs/Members are attachable. The last picker row is
+  [new...] — pick a type and a name. Suite-with-Hub Members get hub-aware
+  scaffolding (git init + @-import + projects.md row). Project/Hub/Member
+  names are globally unique across the whole tree; tmux sessions are named
+  claudehome-<basename> regardless of depth.
 
 Environment variables (or set in ~/.claudehomerc):
   CLAUDEHOME_HOST          Tailscale hostname of the Mac mini   (required)
@@ -194,18 +198,36 @@ if (( LOCAL_MODE )); then
                 [ "$i" -gt 2000 ] && break
                 rel="${p#./}"
                 [ "$p" = "." ] && rel="."
-                n_all=0; n_dirs=0
-                for c in "$p"/* "$p"/.[!.]* "$p"/..?* ; do
-                  [ -e "$c" ] || continue
-                  n_all=$(( n_all + 1 ))
-                  [ -d "$c" ] && n_dirs=$(( n_dirs + 1 ))
-                done
+                # 5-type classification (server-side):
+                #   R = synthetic root (only the `.` row)
+                #   P = has CLAUDE.md (regular file, not symlink/dir)
+                #   S = no CLAUDE.md AND basename ends with _suite
+                #   F = no CLAUDE.md AND any other basename
+                # H/M are synthesized client-side from P rows by the parser.
                 if [ "$rel" = "." ]; then
                   t=R
-                elif [ "$n_all" -gt 0 ] && [ "$n_all" = "$n_dirs" ]; then
-                  t=F
-                else
+                elif [ -f "$p/CLAUDE.md" ]; then
                   t=P
+                else
+                  # bash 3.2 mis-parses `case` inside `$(...)`; use a string
+                  # suffix test instead. ${VAR%%PATTERN} strips the longest
+                  # matching suffix; if it changes, the suffix matched.
+                  base="${p##*/}"
+                  if [ "${base%_suite}" != "$base" ]; then
+                    t=S
+                  else
+                    t=F
+                  fi
+                fi
+                # Compute n_all (immediate child count) only for F/S — used in
+                # picker `(N)` annotation. Projects/Hubs/Members never display
+                # a child count, so we skip the glob loop for those.
+                n_all=0
+                if [ "$t" = "F" ] || [ "$t" = "S" ] || [ "$t" = "R" ]; then
+                  for c in "$p"/* "$p"/.[!.]* "$p"/..?* ; do
+                    [ -e "$c" ] || continue
+                    n_all=$(( n_all + 1 ))
+                  done
                 fi
                 printf '%s\t%s\t%s\n' "$rel" "$t" "$n_all"
               done
@@ -230,18 +252,22 @@ else
           [ \"\$i\" -gt 2000 ] && break
           rel=\"\${p#./}\"
           [ \"\$p\" = \".\" ] && rel=\".\"
-          n_all=0; n_dirs=0
-          for c in \"\$p\"/* \"\$p\"/.[!.]* \"\$p\"/..?* ; do
-            [ -e \"\$c\" ] || continue
-            n_all=\$(( n_all + 1 ))
-            [ -d \"\$c\" ] && n_dirs=\$(( n_dirs + 1 ))
-          done
           if [ \"\$rel\" = \".\" ]; then
             t=R
-          elif [ \"\$n_all\" -gt 0 ] && [ \"\$n_all\" = \"\$n_dirs\" ]; then
-            t=F
-          else
+          elif [ -f \"\$p/CLAUDE.md\" ]; then
             t=P
+          else
+            case \"\${p##*/}\" in
+              *_suite) t=S ;;
+              *)       t=F ;;
+            esac
+          fi
+          n_all=0
+          if [ \"\$t\" = \"F\" ] || [ \"\$t\" = \"S\" ] || [ \"\$t\" = \"R\" ]; then
+            for c in \"\$p\"/* \"\$p\"/.[!.]* \"\$p\"/..?* ; do
+              [ -e \"\$c\" ] || continue
+              n_all=\$(( n_all + 1 ))
+            done
           fi
           printf \"%s\\t%s\\t%s\\n\" \"\$rel\" \"\$t\" \"\$n_all\"
         done
@@ -267,7 +293,11 @@ TMUX_BLOCK="${RAW#*---TMUX---}"
 # ---- parse tree rows ----
 # Populates four parallel arrays keyed by row index:
 #   TREE_PATH[i]      — relative path (e.g. "work/client-a/site"; "." for synthetic root)
-#   TREE_TYPE[i]      — "R", "F", or "P"
+#   TREE_TYPE[i]      — "R" (synthetic root), "F" (Folder), "S" (Suite),
+#                       "P" (Project, no Suite ancestor), "H" (Hub: parent is
+#                       Suite + basename ends _hub), or "M" (Member: has Suite
+#                       ancestor, not a Hub). H/M are synthesized by
+#                       post_classify_tree from server-emitted P rows.
 #   TREE_CHILDREN[i]  — immediate-child count (integer)
 #   TREE_PARENT[i]    — parent path ("" for top-level rows; "" for "." root)
 #
@@ -296,9 +326,11 @@ while IFS= read -r row; do
   # Enforce wire-format invariant. A TAB or newline embedded in an on-disk
   # directory name corrupts the wire format mid-row: the first segment lands
   # in $tp (and may pass the allowlist regex), but the type field $tt then
-  # holds garbage. Reject any row whose type is not R/F/P, which catches the
-  # TAB-in-name case the path allowlist misses.
-  if [[ ! "$tt" =~ ^[RFP]$ ]]; then
+  # holds garbage. Reject any row whose type is not R/F/S/P/H/M, which catches
+  # the TAB-in-name case the path allowlist misses. The server only emits
+  # R/F/S/P; H/M are synthesized client-side below — but the regex permits
+  # them so test fixtures can inject hand-crafted H/M rows.
+  if [[ ! "$tt" =~ ^[RFSPHM]$ ]]; then
     SKIPPED_BAD_PATHS=$(( SKIPPED_BAD_PATHS + 1 ))
     continue
   fi
@@ -319,6 +351,63 @@ while IFS= read -r row; do
   TREE_CHILDREN+=("${tc:-0}")
   TREE_PARENT+=("$parent")
 done <<< "$TREE_BLOCK"
+
+# post_classify_tree
+# Walks the parsed TREE_* arrays in two passes:
+#   1. For each P-row, if any ancestor segment ends `_suite`, promote to M
+#      (Member). If additionally the immediate parent ends `_suite` AND the
+#      row's basename ends `_hub`, promote to H (Hub) instead. Spec §3.2.
+#   2. For each S-row whose ancestor chain contains a `_suite` segment, demote
+#      to F (Folder) and warn — nested Suites are unsupported in v1. AC-5T7.
+# Idempotent: safe to call after refetch_tree as well.
+post_classify_tree() {
+  local i j n_rows=${#TREE_PATH[@]}
+  for (( i=0; i<n_rows; i++ )); do
+    [[ "${TREE_TYPE[$i]}" != "P" ]] && continue
+    local p="${TREE_PATH[$i]}"
+    local segs
+    IFS='/' read -ra segs <<< "$p"
+    local n_segs=${#segs[@]}
+    local has_suite_ancestor=0
+    local parent_is_suite=0
+    # Walk segments[0..n_segs-2] (every ancestor — exclude the row itself).
+    for (( j=0; j<n_segs-1; j++ )); do
+      if [[ "${segs[$j]}" == *_suite ]]; then
+        has_suite_ancestor=1
+        # parent_is_suite if the suite is the IMMEDIATE parent (j == n_segs-2).
+        (( j == n_segs - 2 )) && parent_is_suite=1
+      fi
+    done
+    if (( has_suite_ancestor )); then
+      local row_basename="${segs[$n_segs-1]}"
+      if (( parent_is_suite )) && [[ "$row_basename" == *_hub ]]; then
+        TREE_TYPE[i]=H
+      else
+        TREE_TYPE[i]=M
+      fi
+    fi
+    # else: stays P (no Suite ancestor anywhere)
+  done
+
+  # Second pass: nested-Suite demotion. Walk all S-rows; if any ancestor ends
+  # `_suite`, demote to F and emit one stderr warning per offending path.
+  for (( i=0; i<n_rows; i++ )); do
+    [[ "${TREE_TYPE[$i]}" != "S" ]] && continue
+    local p="${TREE_PATH[$i]}"
+    local segs
+    IFS='/' read -ra segs <<< "$p"
+    local n_segs=${#segs[@]}
+    for (( j=0; j<n_segs-1; j++ )); do
+      if [[ "${segs[$j]}" == *_suite ]]; then
+        TREE_TYPE[i]=F
+        warn "nested Suites not supported; treating $p as Folder"
+        break
+      fi
+    done
+  done
+}
+
+post_classify_tree
 
 if (( SKIPPED_BAD_PATHS > 0 )); then
   echo "claudehome: skipped ${SKIPPED_BAD_PATHS} path with disallowed characters — rename on the mini to surface it" >&2
@@ -353,19 +442,31 @@ _session_activity() {
 # Filters TREE_* arrays to direct children of $path and populates three
 # parallel arrays of picker rows:
 #   PICKER_LINES[]    — display strings (what fzf/select see)
-#   PICKER_KIND[]     — one of: back / folder / project / root_bucket / new_folder / new_project
-#   PICKER_PAYLOAD[]  — context-dependent: full path for folder/project, ".root" for root_bucket, "" for the rest
+#   PICKER_KIND[]     — one of: back / folder / project / new_anything
+#                        (folder kind = drillable: F or S)
+#                        (project kind = attachable: P, H, or M)
+#   PICKER_PAYLOAD[]  — full path for folder/project, "" for back/new_anything
 #
-# Special case: path == ".root" filters to root-level projects only (the
-# synthetic `(root)` drill).
+# Row order:
+#   1. [..  back]   (non-root only)
+#   2. Folders + Suites alphabetically interleaved by basename
+#   3. Projects + Hubs + Members active-then-idle
+#   4. [new...]     (always last)
+#
+# 5-type rendering:
+#   Folder:  <name>/  (N)
+#   Suite:   <name>_suite/  (N)
+#   Project: <name>  [active <ts>] | <name>  [idle]
+#   Hub:     <name>_hub  HUB  [active <ts>] | <name>_hub  HUB  [idle]
+#   Member:  <name>  member  [active <ts>] | <name>  member  [idle]
 build_rows_for_path() {
   local path=$1
   PICKER_LINES=()
   PICKER_KIND=()
   PICKER_PAYLOAD=()
 
-  # [..  back] for non-root non-root_bucket frames.
-  if [[ -n "$path" && "$path" != ".root" ]]; then
+  # [..  back] for non-root frames.
+  if [[ -n "$path" ]]; then
     PICKER_LINES+=("[..  back]")
     PICKER_KIND+=("back")
     PICKER_PAYLOAD+=("")
@@ -373,23 +474,10 @@ build_rows_for_path() {
 
   local i n n_rows=${#TREE_PATH[@]}
   local folder_lines=() folder_paths=()
-  local active_lines=() active_keys=()
-  local idle_lines=() idle_keys=()
+  local active_lines=() active_keys=() active_paths=()
+  local idle_lines=() idle_paths=()
 
-  # `path == ".root"` means "list root-level projects only" — a virtual drill
-  # into the synthetic root bucket. Translate to the real filter: parent==""
-  # AND type==P, skipping any folders.
-  local match_parent root_bucket_mode=0
-  if [[ "$path" == ".root" ]]; then
-    match_parent=""
-    root_bucket_mode=1
-  else
-    match_parent="$path"
-  fi
-
-  # Track presence of folders + projects at top level for the `(root)` bucket
-  # decision. We only care about this when path == "" (true top level).
-  local root_has_folders=0 root_has_projects=0
+  local match_parent="$path"
 
   for (( i=0; i<n_rows; i++ )); do
     local p="${TREE_PATH[$i]}"
@@ -397,34 +485,56 @@ build_rows_for_path() {
     local par="${TREE_PARENT[$i]}"
     # Skip the synthetic root row itself.
     [[ "$p" == "." ]] && continue
-    if [[ -z "$path" ]]; then
-      [[ "$par" == "" && "$t" == "F" ]] && root_has_folders=1
-      [[ "$par" == "" && "$t" == "P" ]] && root_has_projects=1
-    fi
     [[ "$par" != "$match_parent" ]] && continue
-    if (( root_bucket_mode )); then
-      # Root bucket: only show projects, never folders.
-      [[ "$t" != "P" ]] && continue
-    fi
     local basename="${p##*/}"
-    if [[ "$t" == "F" ]]; then
-      n="${TREE_CHILDREN[$i]}"
-      folder_lines+=("${basename}/  (${n})")
-      folder_paths+=("$p")
-    else
-      _session_activity "$basename"
-      if [[ -n "${ACT_TS:-}" ]]; then
-        active_lines+=("${basename}  [active ${ACT_LABEL}]")
-        active_keys+=("${ACT_TS}"$'\t'"${basename}")
-      else
-        idle_lines+=("${basename}  [idle]")
-        idle_keys+=("${basename}")
-      fi
-    fi
+    case "$t" in
+      F)
+        n="${TREE_CHILDREN[$i]}"
+        folder_lines+=("${basename}/  (${n})")
+        folder_paths+=("$p")
+        ;;
+      S)
+        n="${TREE_CHILDREN[$i]}"
+        # Suite renders as `<name>_suite/  (N)` — the `_suite` suffix is
+        # already part of $basename. Folders + Suites interleave by basename.
+        folder_lines+=("${basename}/  (${n})")
+        folder_paths+=("$p")
+        ;;
+      P|H|M)
+        # Compute badge column. The badge sits between basename and activity.
+        local badge=""
+        case "$t" in
+          H) badge="HUB" ;;
+          M) badge="member" ;;
+        esac
+        _session_activity "$basename"
+        local act_col
+        if [[ -n "${ACT_TS:-}" ]]; then
+          act_col="[active ${ACT_LABEL}]"
+        else
+          act_col="[idle]"
+        fi
+        # Build display line: <basename>  [<badge>  ]<act_col>
+        local line
+        if [[ -n "$badge" ]]; then
+          line="${basename}  ${badge}  ${act_col}"
+        else
+          line="${basename}  ${act_col}"
+        fi
+        if [[ -n "${ACT_TS:-}" ]]; then
+          active_lines+=("$line")
+          active_keys+=("${ACT_TS}")
+          active_paths+=("$p")
+        else
+          idle_lines+=("$line")
+          idle_paths+=("$p")
+        fi
+        ;;
+    esac
   done
 
-  # Sort folders alphabetically by basename — emit display lines in basename
-  # order. We sort the parallel arrays via a tagged sort.
+  # Sort folders + suites alphabetically by basename — interleaved (no
+  # separation between F and S). Tagged sort on the display line.
   if (( ${#folder_lines[@]} > 0 )); then
     local sorted
     sorted=$(
@@ -441,71 +551,43 @@ build_rows_for_path() {
     done <<< "$sorted"
   fi
 
-  # Active projects descending by timestamp, then idle alphabetical.
+  # Active projects/hubs/members descending by activity timestamp.
   if (( ${#active_lines[@]} > 0 )); then
     local sorted
     sorted=$(
       local k
       for (( k=0; k<${#active_lines[@]}; k++ )); do
-        printf '%s\t%s\n' "${active_keys[$k]}" "${active_lines[$k]}"
+        printf '%s\t%s\t%s\n' "${active_keys[$k]}" "${active_lines[$k]}" "${active_paths[$k]}"
       done | LC_ALL=C sort -t$'\t' -k1,1nr -k2,2
     )
-    while IFS=$'\t' read -r _ts _name aline; do
-      # active_keys is "<ts>\t<basename>", so split is 3 fields total
+    while IFS=$'\t' read -r _ts aline apath; do
       [[ -z "${aline:-}" ]] && continue
-      # The basename is the last "  " segment of the line; recover it.
-      local apname="${aline%%  *}"
       PICKER_LINES+=("$aline")
       PICKER_KIND+=("project")
-      PICKER_PAYLOAD+=("${match_parent:+$match_parent/}$apname")
+      PICKER_PAYLOAD+=("$apath")
     done <<< "$sorted"
   fi
+
+  # Idle projects/hubs/members alphabetical by display line (basename-prefix).
   if (( ${#idle_lines[@]} > 0 )); then
     local sorted
-    sorted=$(printf '%s\n' "${idle_lines[@]}" | LC_ALL=C sort)
-    while IFS= read -r iline; do
+    sorted=$(
+      local k
+      for (( k=0; k<${#idle_lines[@]}; k++ )); do
+        printf '%s\t%s\n' "${idle_lines[$k]}" "${idle_paths[$k]}"
+      done | LC_ALL=C sort
+    )
+    while IFS=$'\t' read -r iline ipath; do
       [[ -z "$iline" ]] && continue
-      local ipname="${iline%%  *}"
       PICKER_LINES+=("$iline")
       PICKER_KIND+=("project")
-      PICKER_PAYLOAD+=("${match_parent:+$match_parent/}$ipname")
+      PICKER_PAYLOAD+=("$ipath")
     done <<< "$sorted"
   fi
 
-  # `(root)` bucket — only at true top level (path == "") and only when both
-  # root folders AND root projects exist.
-  if [[ -z "$path" ]] && (( root_has_folders )) && (( root_has_projects )); then
-    # Count root projects for the (N) annotation.
-    local root_n=0
-    for (( i=0; i<n_rows; i++ )); do
-      [[ "${TREE_TYPE[$i]}" == "P" && "${TREE_PARENT[$i]}" == "" ]] && root_n=$(( root_n + 1 ))
-    done
-    PICKER_LINES+=("(root)  (${root_n})")
-    PICKER_KIND+=("root_bucket")
-    PICKER_PAYLOAD+=(".root")
-    # When the (root) bucket is shown, the per-project root rows we already
-    # appended above are duplicates — strip them. We do that by rebuilding
-    # the arrays minus the project rows we just added at top level. This
-    # only applies at the true top level.
-    local kept_lines=() kept_kinds=() kept_pls=()
-    for (( i=0; i<${#PICKER_LINES[@]}; i++ )); do
-      if [[ "${PICKER_KIND[$i]}" == "project" && "${PICKER_PAYLOAD[$i]}" != */* ]]; then
-        continue
-      fi
-      kept_lines+=("${PICKER_LINES[$i]}")
-      kept_kinds+=("${PICKER_KIND[$i]}")
-      kept_pls+=("${PICKER_PAYLOAD[$i]}")
-    done
-    PICKER_LINES=("${kept_lines[@]}")
-    PICKER_KIND=("${kept_kinds[@]}")
-    PICKER_PAYLOAD=("${kept_pls[@]}")
-  fi
-
-  PICKER_LINES+=("[new folder here]")
-  PICKER_KIND+=("new_folder")
-  PICKER_PAYLOAD+=("")
-  PICKER_LINES+=("[new project here]")
-  PICKER_KIND+=("new_project")
+  # Always-last [new...] row. Triggers context-aware type prompt.
+  PICKER_LINES+=("[new...]")
+  PICKER_KIND+=("new_anything")
   PICKER_PAYLOAD+=("")
 }
 
@@ -545,127 +627,566 @@ pick_one() {
   SELECTED_KIND=cancel
 }
 
-# ---- creation flows ----
-# Both prompt_new_folder and prompt_new_project read a basename from stdin,
-# enforce the standard allowlist, and check for collisions. They communicate
-# success via globals (PROMPT_NAME for both; the picker_loop assigns it into
-# PICKER_PROJECT for the new_project case). Returning non-zero would clash
-# with `set -euo pipefail`; instead they set PROMPT_OK to 1 (success) or 0.
+# ---- creation flows (5-type) ----
+#
+# `prompt_new_anything <parent_path>` is the single entry point for the
+# `[new...]` picker row. It determines the parent's type, computes valid
+# creation types from spec §3.3, prompts the user for a type then a name, and
+# dispatches to a per-type `create_*` helper. Communicates with the caller via
+# globals:
+#   PROMPT_OK     — 1 on success, 0 on cancel/failure (errexit-safe).
+#   PROMPT_NAME   — final basename created (with auto-suffix applied).
+#   PROMPT_PARENT — parent path under which the row was created.
+#   PROMPT_KIND   — "attach" if the new entry is attachable (project/hub/member),
+#                   "folder" if it's a Folder/Suite (no attach).
+#
+# Sibling-collision and globally-unique checks live in shared helpers below.
 
-# prompt_new_folder $parent_path
-# On success: creates the folder on disk, re-fetches and re-parses the tree,
-# and sets PROMPT_OK=1. On failure: sets PROMPT_OK=0 and re-prompts handled
-# by the caller.
-prompt_new_folder() {
-  local parent=$1
-  local name=
-  PROMPT_OK=0
-  PROMPT_NAME=
-  while :; do
-    if ! read -r -p "New folder name: " name; then
+# _validate_name <name> — set RES_OK=1 on accept, 0 with reason text on stderr.
+# Enforces the allowlist + reserved-name rules used by all creation flows.
+_validate_name() {
+  local name=$1
+  RES_OK=0
+  if [[ -z "$name" ]]; then
+    return 0
+  fi
+  if [[ ! "$name" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+    echo "  '${name}' has unsupported characters. Allowed: letters, digits, '.', '_', '-'. Try again." >&2
+    return 0
+  fi
+  if [[ "$name" == "." || "$name" == ".." || "$name" == .* ]]; then
+    echo "  '${name}' is reserved. Pick a different name." >&2
+    return 0
+  fi
+  RES_OK=1
+}
+
+# _check_sibling_collision <parent_path> <name> — set RES_COLLIDE=1 if a row
+# with the given basename already exists under $parent_path (any type).
+_check_sibling_collision() {
+  local parent=$1 name=$2
+  RES_COLLIDE=0
+  local i
+  for (( i=0; i<${#TREE_PATH[@]}; i++ )); do
+    [[ "${TREE_PARENT[$i]}" != "$parent" ]] && continue
+    local ex_basename="${TREE_PATH[$i]##*/}"
+    if [[ "$ex_basename" == "$name" ]]; then
+      RES_COLLIDE=1
       return 0
     fi
-    [[ -z "$name" ]] && return 0
-    if [[ ! "$name" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-      echo "  '${name}' has unsupported characters. Allowed: letters, digits, '.', '_', '-'. Try again." >&2
-      continue
+  done
+}
+
+# _check_global_unique <name> — set RES_CONFLICT to the conflicting full path
+# if any P/H/M-type row anywhere in the tree shares the basename. Empty if no
+# conflict. Used by project/hub/member creation; folder/suite creation skips
+# this check (folders/suites are not globally unique).
+_check_global_unique() {
+  local name=$1
+  RES_CONFLICT=
+  local i
+  for (( i=0; i<${#TREE_PATH[@]}; i++ )); do
+    local t="${TREE_TYPE[$i]}"
+    [[ "$t" != "P" && "$t" != "H" && "$t" != "M" ]] && continue
+    local ex_basename="${TREE_PATH[$i]##*/}"
+    if [[ "$ex_basename" == "$name" ]]; then
+      RES_CONFLICT="${TREE_PATH[$i]}"
+      return 0
     fi
-    # Reject `.`, `..`, and leading-dot names. The allowlist regex permits
-    # them character-wise, but `..` would create the folder above the projects
-    # root, and leading-dot names are filtered by the tree walk so they
-    # disappear from the picker on next launch.
-    if [[ "$name" == "." || "$name" == ".." || "$name" == .* ]]; then
-      echo "  '${name}' is reserved. Pick a different name." >&2
-      continue
+  done
+}
+
+# walk_to_suite_root <drill_path> — walk segments of $drill_path looking for
+# the closest-to-root segment ending `_suite`. Sets RES_SUITE_ROOT to the
+# accumulated path of that segment, or "" if none.
+walk_to_suite_root() {
+  local p=$1
+  RES_SUITE_ROOT=
+  [[ -z "$p" ]] && return 0
+  local segs
+  IFS='/' read -ra segs <<< "$p"
+  local n=${#segs[@]} j acc=""
+  for (( j=0; j<n; j++ )); do
+    acc="${acc:+$acc/}${segs[$j]}"
+    if [[ "${segs[$j]}" == *_suite ]]; then
+      RES_SUITE_ROOT="$acc"
+      return 0
     fi
-    # Sibling collision: any row at the same parent with the same basename,
-    # regardless of type (folder OR project).
-    local i collide=0
-    for (( i=0; i<${#TREE_PATH[@]}; i++ )); do
-      [[ "${TREE_PARENT[$i]}" != "$parent" ]] && continue
-      local ex_basename="${TREE_PATH[$i]##*/}"
-      if [[ "$ex_basename" == "$name" ]]; then
-        collide=1
-        break
+  done
+}
+
+# detect_hub <suite_root_relpath> — count `*_hub` direct children of the Suite
+# that have CLAUDE.md (i.e., are real Hubs). Sets RES_HUB_COUNT (integer) and
+# RES_HUB_PATH (absolute filesystem path of the unique Hub when count == 1;
+# empty otherwise). Operates on the local filesystem in LOCAL_MODE; SSHs to
+# the remote in remote mode (one round-trip).
+detect_hub() {
+  local suite_rel=$1
+  RES_HUB_COUNT=0
+  RES_HUB_PATH=
+  [[ -z "$suite_rel" ]] && return 0
+  if (( LOCAL_MODE )); then
+    local suite_abs="${LOCAL_DIR}/${suite_rel}"
+    local h
+    for h in "$suite_abs"/*_hub; do
+      if [[ -d "$h" && -f "$h/CLAUDE.md" ]]; then
+        RES_HUB_COUNT=$(( RES_HUB_COUNT + 1 ))
+        RES_HUB_PATH="$h"
       fi
     done
-    if (( collide )); then
-      local where="${parent:+$parent/}${name}"
-      echo "  '${name}' already exists at ${where}. Pick a different name." >&2
+    if (( RES_HUB_COUNT > 1 )); then
+      RES_HUB_PATH=
+    fi
+  else
+    # Remote: probe via SSH. Print "<count>\t<abs_path_or_empty>".
+    local probe
+    # shellcheck disable=SC2029
+    probe=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "${REMOTE_USER}@${HOST}" \
+      "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c '
+        cd ${PROJECTS_DIR} 2>/dev/null || exit 0
+        suite=\"${suite_rel}\"
+        n=0; first=
+        for h in \"\$suite\"/*_hub; do
+          [ -d \"\$h\" ] && [ -f \"\$h/CLAUDE.md\" ] || continue
+          n=\$((n+1))
+          [ -z \"\$first\" ] && first=\$(cd \"\$h\" 2>/dev/null && pwd -P)
+        done
+        printf \"%s\\t%s\\n\" \"\$n\" \"\$first\"
+      '" 2>/dev/null) || probe=""
+    if [[ -n "$probe" ]]; then
+      local cnt path_line
+      IFS=$'\t' read -r cnt path_line <<< "$probe"
+      RES_HUB_COUNT="${cnt:-0}"
+      if (( RES_HUB_COUNT == 1 )); then
+        RES_HUB_PATH="${path_line:-}"
+      fi
+    fi
+  fi
+}
+
+# prompt_description — read a single-line description from stdin. Sets
+# RES_DESC; empty input yields the placeholder string. Embedded newlines are
+# rejected with re-prompt.
+prompt_description() {
+  RES_DESC=
+  local desc
+  while :; do
+    if ! read -r -p "One-line description (optional): " desc; then
+      RES_DESC="<one-line description goes here>"
+      return 0
+    fi
+    if [[ "$desc" == *$'\n'* ]]; then
+      warn "description must be single-line"
       continue
     fi
-    # Create on disk.
-    local rel="${parent:+$parent/}${name}"
-    if (( LOCAL_MODE )); then
-      mkdir -p "${LOCAL_DIR}/${rel}"
+    if [[ -z "$desc" ]]; then
+      RES_DESC="<one-line description goes here>"
     else
-      # shellcheck disable=SC2029
-      ssh -o BatchMode=yes -o ConnectTimeout=5 "${REMOTE_USER}@${HOST}" \
-        "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c 'mkdir -p ${PROJECTS_DIR}/${rel}'" >/dev/null 2>&1 || true
+      RES_DESC="$desc"
     fi
-    # Re-fetch and re-parse the tree so the new folder is visible in the
-    # next picker render.
-    refetch_tree
-    PROMPT_NAME="$name"
-    PROMPT_OK=1
     return 0
   done
 }
 
-# prompt_new_project $parent_path
-# On success: sets PROMPT_OK=1 and PROMPT_NAME=<basename>. The caller wires
-# the rest of the attach machinery; mkdir for the project happens at attach
-# time (existing behavior — see L302+ attach branch).
-prompt_new_project() {
-  local parent=$1
-  local name=
-  PROMPT_OK=0
-  PROMPT_NAME=
+# _mkdir_remote_or_local <relpath> — idempotent mkdir under the projects root.
+# Used by every creation helper that materializes a directory on disk.
+_mkdir_remote_or_local() {
+  local rel=$1
+  if (( LOCAL_MODE )); then
+    mkdir -p "${LOCAL_DIR}/${rel}"
+  else
+    # shellcheck disable=SC2029
+    ssh -o BatchMode=yes -o ConnectTimeout=5 "${REMOTE_USER}@${HOST}" \
+      "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c 'mkdir -p ${PROJECTS_DIR}/${rel}'" >/dev/null 2>&1 \
+      || warn "mkdir failed for ${rel}; continuing"
+  fi
+}
+
+# create_folder <parent_path> <name> — mkdir the Folder, refetch the tree.
+# Sets PROMPT_OK=1 on success, PROMPT_KIND="folder", PROMPT_PARENT/PROMPT_NAME.
+create_folder() {
+  local parent=$1 name=$2
+  local rel="${parent:+$parent/}${name}"
+  _mkdir_remote_or_local "$rel"
+  refetch_tree
+  PROMPT_OK=1
+  PROMPT_KIND=folder
+  PROMPT_PARENT="$parent"
+  PROMPT_NAME="$name"
+}
+
+# create_suite <parent_path> <prefix> — mkdir the Suite (auto-appending _suite),
+# refetch the tree.
+create_suite() {
+  local parent=$1 prefix=$2
+  local final="${prefix}_suite"
+  local rel="${parent:+$parent/}${final}"
+  _mkdir_remote_or_local "$rel"
+  refetch_tree
+  PROMPT_OK=1
+  PROMPT_KIND=folder
+  PROMPT_PARENT="$parent"
+  PROMPT_NAME="$final"
+}
+
+# create_project <parent_path> <name> — record the new project for attach. The
+# attach branch creates the directory + tmux session. We also write a minimal
+# CLAUDE.md so re-runs classify it as Project (otherwise it'd be Folder per
+# the new heuristic).
+create_project() {
+  local parent=$1 name=$2
+  local rel="${parent:+$parent/}${name}"
+  _mkdir_remote_or_local "$rel"
+  _write_minimal_claude_md "$rel" "$name"
+  PROMPT_OK=1
+  PROMPT_KIND=attach
+  PROMPT_PARENT="$parent"
+  PROMPT_NAME="$name"
+}
+
+# create_hub <parent_path> <prefix> — Suite-with-Hub creation. mkdir the Hub
+# (auto-appending _hub), write CLAUDE.md, README.md template, projects.md
+# header. The Hub is then attachable like any P/H/M.
+create_hub() {
+  local parent=$1 prefix=$2
+  local final="${prefix}_hub"
+  local rel="${parent:+$parent/}${final}"
+  _mkdir_remote_or_local "$rel"
+  _write_hub_scaffold "$rel" "$final"
+  PROMPT_OK=1
+  PROMPT_KIND=attach
+  PROMPT_PARENT="$parent"
+  PROMPT_NAME="$final"
+}
+
+# create_member <parent_path> <name> <suite_root_relpath> — full hub-aware
+# Member creation. mkdir, optionally git init + @-import CLAUDE.md +
+# projects.md row when exactly one Hub exists at the Suite root. On Multi-Hub
+# or no-Hub, falls back to a plain `# <name>\n` CLAUDE.md.
+create_member() {
+  local parent=$1 name=$2 suite_root=$3
+  local rel="${parent:+$parent/}${name}"
+  _mkdir_remote_or_local "$rel"
+
+  # Detect Hub at the Suite root.
+  detect_hub "$suite_root"
+  local hub_count="$RES_HUB_COUNT"
+  local hub_path="$RES_HUB_PATH"
+
+  if (( hub_count == 0 )); then
+    # No Hub: plain CLAUDE.md, no description prompt, no scaffolding.
+    _write_minimal_claude_md "$rel" "$name"
+  elif (( hub_count >= 2 )); then
+    # Multi-Hub: warn and fall back to plain.
+    local suite_abs
+    if (( LOCAL_MODE )); then
+      suite_abs="${LOCAL_DIR}/${suite_root}"
+    else
+      suite_abs="${PROJECTS_DIR}/${suite_root}"
+    fi
+    warn "multiple *_hub siblings found in ${suite_abs}; skipping hub-aware writes"
+    _write_minimal_claude_md "$rel" "$name"
+  else
+    # Exactly one Hub: full hub-aware scaffolding.
+    prompt_description
+    local desc="$RES_DESC"
+    _hub_aware_writes "$rel" "$name" "$hub_path" "$desc"
+  fi
+
+  PROMPT_OK=1
+  PROMPT_KIND=attach
+  PROMPT_PARENT="$parent"
+  PROMPT_NAME="$name"
+}
+
+# _write_minimal_claude_md <relpath> <name> — write `# <name>\n` to
+# <projects_root>/<relpath>/CLAUDE.md. Idempotent — safe to call repeatedly.
+_write_minimal_claude_md() {
+  local rel=$1 name=$2
+  if (( LOCAL_MODE )); then
+    local path="${LOCAL_DIR}/${rel}/CLAUDE.md"
+    [[ -f "$path" ]] && return 0
+    printf '# %s\n' "$name" > "$path" 2>/dev/null || warn "write failed for ${rel}/CLAUDE.md"
+  else
+    # shellcheck disable=SC2029
+    ssh -o BatchMode=yes -o ConnectTimeout=5 "${REMOTE_USER}@${HOST}" \
+      "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c '
+        f=${PROJECTS_DIR}/${rel}/CLAUDE.md
+        [ -f \"\$f\" ] || printf \"# %s\\n\" \"${name}\" > \"\$f\"
+      '" >/dev/null 2>&1 || warn "write failed for ${rel}/CLAUDE.md"
+  fi
+}
+
+# _write_hub_scaffold <relpath> <hub_name> — write Hub CLAUDE.md, README.md,
+# and projects.md header. Idempotent on per-file basis (skip if file exists).
+_write_hub_scaffold() {
+  local rel=$1 hub_name=$2
+  if (( LOCAL_MODE )); then
+    local hub_abs="${LOCAL_DIR}/${rel}"
+    [[ -f "$hub_abs/CLAUDE.md" ]]   || printf '# %s\n' "$hub_name"          > "$hub_abs/CLAUDE.md"   2>/dev/null || warn "write failed for ${rel}/CLAUDE.md"
+    [[ -f "$hub_abs/README.md" ]]   || printf '# %s\n\nHub README.\n' "$hub_name" > "$hub_abs/README.md" 2>/dev/null || warn "write failed for ${rel}/README.md"
+    if [[ ! -f "$hub_abs/projects.md" ]]; then
+      {
+        printf '| Name | Description | Status | Owner | Notes |\n'
+        printf '|------|-------------|--------|-------|-------|\n'
+      } > "$hub_abs/projects.md" 2>/dev/null || warn "write failed for ${rel}/projects.md"
+    fi
+  else
+    # Remote: one SSH round-trip with all three writes.
+    # shellcheck disable=SC2029
+    ssh -o BatchMode=yes -o ConnectTimeout=5 "${REMOTE_USER}@${HOST}" \
+      "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c '
+        d=${PROJECTS_DIR}/${rel}
+        [ -f \"\$d/CLAUDE.md\" ]   || printf \"# %s\\n\" \"${hub_name}\" > \"\$d/CLAUDE.md\"
+        [ -f \"\$d/README.md\" ]   || printf \"# %s\\n\\nHub README.\\n\" \"${hub_name}\" > \"\$d/README.md\"
+        if [ ! -f \"\$d/projects.md\" ]; then
+          {
+            printf \"| Name | Description | Status | Owner | Notes |\\n\"
+            printf \"|------|-------------|--------|-------|-------|\\n\"
+          } > \"\$d/projects.md\"
+        fi
+      '" >/dev/null 2>&1 || warn "hub scaffold write failed for ${rel}"
+  fi
+}
+
+# _hub_aware_writes <member_rel> <member_name> <hub_abs> <description> —
+# the four hub-aware writes for a Member. All warn-and-continue; never abort.
+#   1. git init in the member directory
+#   2. write CLAUDE.md with @-import to the Hub README
+#   3. append a row to <hub>/projects.md (only if it exists and is non-empty)
+# _sq_escape <string> — escape every `'` for safe inclusion inside a single-
+# quoted bash context. The bash idiom is to close the quote, write an escaped
+# quote, then reopen: '\''. Used by _hub_aware_writes for the description
+# (which is free user text and CANNOT be allowlist-restricted; name/hub_abs
+# are already validated against [a-zA-Z0-9._-]+ so they cannot contain `'`).
+# Without this escape, a malicious description like "x'; rm -rf ~; echo '"
+# would close the outer `bash -c '...'` quote and execute arbitrary commands
+# on the mini under REMOTE_USER (verified RCE; security review iter-1 finding).
+_sq_escape() {
+  printf %s "$1" | sed "s/'/'\\\\''/g"
+}
+
+_hub_aware_writes() {
+  local rel=$1 name=$2 hub_abs=$3 desc=$4
+  local desc_pipe_escaped="${desc//|/\\|}"
+  if (( LOCAL_MODE )); then
+    local member_abs="${LOCAL_DIR}/${rel}"
+    ( cd "$member_abs" 2>/dev/null && git init >/dev/null 2>&1 ) \
+      || warn "git init failed for ${rel}; .git/ not initialized"
+    {
+      printf '# %s\n\n' "$name"
+      printf '@%s/README.md\n\n' "$hub_abs"
+      printf '%s\n' "$desc"
+    } > "$member_abs/CLAUDE.md" 2>/dev/null \
+      || warn "write failed for ${rel}/CLAUDE.md"
+    if [[ -s "$hub_abs/projects.md" ]]; then
+      printf '| %s | %s | active | — | — |\n' "$name" "$desc_pipe_escaped" \
+        >> "$hub_abs/projects.md" 2>/dev/null \
+        || warn "append failed for ${hub_abs}/projects.md"
+    else
+      warn "${hub_abs}/projects.md missing or empty; row not appended"
+    fi
+  else
+    # Escape single quotes in user-supplied free text before splicing into
+    # the outer `bash -c '...'` quoted command. Without this, a `'` in $desc
+    # would close the outer quote and allow arbitrary command execution on
+    # the mini.
+    local desc_sq desc_pipe_sq
+    desc_sq=$(_sq_escape "$desc")
+    desc_pipe_sq=$(_sq_escape "$desc_pipe_escaped")
+    # shellcheck disable=SC2029
+    ssh -o BatchMode=yes -o ConnectTimeout=5 "${REMOTE_USER}@${HOST}" \
+      "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c '
+        member=${PROJECTS_DIR}/${rel}
+        hub=\"${hub_abs}\"
+        ( cd \"\$member\" 2>/dev/null && git init >/dev/null 2>&1 ) || true
+        {
+          printf \"# %s\\n\\n\" \"${name}\"
+          printf \"@%s/README.md\\n\\n\" \"\$hub\"
+          printf \"%s\\n\" \"${desc_sq}\"
+        } > \"\$member/CLAUDE.md\"
+        if [ -s \"\$hub/projects.md\" ]; then
+          printf \"| %s | %s | active | — | — |\\n\" \"${name}\" \"${desc_pipe_sq}\" >> \"\$hub/projects.md\"
+        fi
+      '" >/dev/null 2>&1 || warn "hub-aware writes failed for ${rel}"
+  fi
+}
+
+# _read_type_choice <valid_types> — read a creation-type choice from stdin.
+# Accepts substring matches (e.g. `f` → `folder`). Sets RES_TYPE on accept;
+# empty/Ctrl-D sets RES_TYPE="".
+_read_type_choice() {
+  local valid_types=$1
+  RES_TYPE=
+  local input
   while :; do
-    if ! read -r -p "New project name: " name; then
+    if ! read -r -p "Create what? [$valid_types]: " input; then
       return 0
     fi
+    if [[ -z "$input" ]]; then
+      return 0
+    fi
+    # Match against valid types as full word OR unique substring prefix.
+    local matched=
+    local v
+    for v in $valid_types; do
+      if [[ "$v" == "$input" ]]; then
+        matched="$v"
+        break
+      fi
+    done
+    if [[ -z "$matched" ]]; then
+      for v in $valid_types; do
+        if [[ "$v" == "$input"* ]]; then
+          if [[ -n "$matched" ]]; then
+            matched=AMBIGUOUS
+            break
+          fi
+          matched="$v"
+        fi
+      done
+    fi
+    if [[ -z "$matched" || "$matched" == AMBIGUOUS ]]; then
+      warn "invalid type '${input}'; expected one of: ${valid_types}"
+      continue
+    fi
+    RES_TYPE="$matched"
+    return 0
+  done
+}
+
+# prompt_new_anything <parent_path>
+# Single dispatch point for the [new...] picker row. See spec §3.3.
+prompt_new_anything() {
+  local parent=$1
+  PROMPT_OK=0
+  PROMPT_KIND=
+  PROMPT_PARENT=
+  PROMPT_NAME=
+
+  # 1. Determine parent type. The picker only drills into R/F/S, so the
+  # parent here is one of R (root, parent==""), F, or S. Any other type is
+  # an internal error.
+  local parent_type=
+  if [[ -z "$parent" ]]; then
+    parent_type=R
+  else
+    local i
+    for (( i=0; i<${#TREE_PATH[@]}; i++ )); do
+      if [[ "${TREE_PATH[$i]}" == "$parent" ]]; then
+        parent_type="${TREE_TYPE[$i]}"
+        break
+      fi
+    done
+  fi
+  if [[ "$parent_type" != R && "$parent_type" != F && "$parent_type" != S ]]; then
+    warn "[new...] not available at this drill level"
+    return 0
+  fi
+
+  # 2. Compute valid creation types from parent type.
+  # F-type is structurally ambiguous (plain Folder vs sub-Folder inside Suite),
+  # so walk_to_suite_root first to disambiguate. S-type is always at a Suite
+  # root; check for existing Hub via detect_hub.
+  local suite_root="" valid_types=""
+  case "$parent_type" in
+    R) valid_types="folder suite project" ;;
+    F)
+      walk_to_suite_root "$parent"
+      suite_root="$RES_SUITE_ROOT"
+      if [[ -n "$suite_root" ]]; then
+        valid_types="folder member"
+      else
+        valid_types="folder project"
+      fi
+      ;;
+    S)
+      suite_root="$parent"
+      detect_hub "$suite_root"
+      if (( RES_HUB_COUNT == 0 )); then
+        valid_types="folder member hub"
+      else
+        valid_types="folder member"
+      fi
+      ;;
+  esac
+
+  # 3. Prompt for type.
+  _read_type_choice "$valid_types"
+  local type="$RES_TYPE"
+  [[ -z "$type" ]] && return 0
+
+  # 4. Prompt for name (loop on validation errors).
+  local name=
+  while :; do
+    case "$type" in
+      folder)  read -r -p "New folder name: "  name || return 0 ;;
+      project) read -r -p "New project name: " name || return 0 ;;
+      suite)   read -r -p "New suite name (suffix _suite is auto-appended): " name || return 0 ;;
+      hub)     read -r -p "New hub name (suffix _hub is auto-appended): "     name || return 0 ;;
+      member)  read -r -p "New member name: "  name || return 0 ;;
+    esac
     [[ -z "$name" ]] && return 0
-    if [[ ! "$name" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-      echo "  '${name}' has unsupported characters. Allowed: letters, digits, '.', '_', '-'. Try again." >&2
+
+    # Suite/Hub: reject any user-typed `_suite`/`_hub` substring, then
+    # auto-append the suffix on validation pass.
+    case "$type" in
+      suite)
+        case "$name" in
+          *_suite|*_suite_*)
+            warn "name '_suite' substring not allowed; type just the prefix and the suffix is auto-appended."
+            continue ;;
+        esac
+        ;;
+      hub)
+        case "$name" in
+          *_hub|*_hub_*)
+            warn "name '_hub' substring not allowed; type just the prefix and the suffix is auto-appended."
+            continue ;;
+        esac
+        ;;
+    esac
+
+    _validate_name "$name"
+    if (( ! RES_OK )); then
+      [[ -z "$name" ]] && return 0
       continue
     fi
-    if [[ "$name" == "." || "$name" == ".." || "$name" == .* ]]; then
-      echo "  '${name}' is reserved. Pick a different name." >&2
+
+    # final_name is what actually lands on disk (after auto-suffix).
+    local final_name="$name"
+    case "$type" in
+      suite) final_name="${name}_suite" ;;
+      hub)   final_name="${name}_hub" ;;
+    esac
+
+    # Sibling collision check (any type at the same parent).
+    _check_sibling_collision "$parent" "$final_name"
+    if (( RES_COLLIDE )); then
+      local where="${parent:+$parent/}${final_name}"
+      echo "  '${final_name}' already exists at ${where}. Pick a different name." >&2
       continue
     fi
-    # Sibling collision (same parent, any type).
-    local i collide=0
-    for (( i=0; i<${#TREE_PATH[@]}; i++ )); do
-      [[ "${TREE_PARENT[$i]}" != "$parent" ]] && continue
-      local ex_basename="${TREE_PATH[$i]##*/}"
-      if [[ "$ex_basename" == "$name" ]]; then
-        collide=1
-        break
-      fi
-    done
-    if (( collide )); then
-      local where="${parent:+$parent/}${name}"
-      echo "  '${name}' already exists at ${where}. Pick a different name." >&2
-      continue
-    fi
-    # Globally-unique scan: any P-type row anywhere in the tree with the
-    # same basename. Cite the conflicting full path.
-    local conflict=
-    for (( i=0; i<${#TREE_PATH[@]}; i++ )); do
-      [[ "${TREE_TYPE[$i]}" != "P" ]] && continue
-      local ex_basename="${TREE_PATH[$i]##*/}"
-      if [[ "$ex_basename" == "$name" ]]; then
-        conflict="${TREE_PATH[$i]}"
-        break
-      fi
-    done
-    if [[ -n "$conflict" ]]; then
-      echo "  '${name}' already exists at ${conflict}. Pick a different name." >&2
-      continue
-    fi
-    PROMPT_NAME="$name"
-    PROMPT_OK=1
+
+    # Globally-unique scan for project/hub/member basenames.
+    case "$type" in
+      project|hub|member)
+        _check_global_unique "$final_name"
+        if [[ -n "$RES_CONFLICT" ]]; then
+          echo "  '${final_name}' already exists at ${RES_CONFLICT}. Pick a different name." >&2
+          continue
+        fi
+        ;;
+    esac
+
+    # 5. Dispatch to type-specific creator. Each sets PROMPT_OK + companions.
+    case "$type" in
+      folder)  create_folder  "$parent" "$final_name" ;;
+      suite)   create_suite   "$parent" "$name" ;;
+      project) create_project "$parent" "$final_name" ;;
+      hub)     create_hub     "$parent" "$name" ;;
+      member)  create_member  "$parent" "$final_name" "$suite_root" ;;
+    esac
     return 0
   done
 }
@@ -692,18 +1213,24 @@ refetch_tree() {
                   [ "$i" -gt 2000 ] && break
                   rel="${p#./}"
                   [ "$p" = "." ] && rel="."
-                  n_all=0; n_dirs=0
-                  for c in "$p"/* "$p"/.[!.]* "$p"/..?* ; do
-                    [ -e "$c" ] || continue
-                    n_all=$(( n_all + 1 ))
-                    [ -d "$c" ] && n_dirs=$(( n_dirs + 1 ))
-                  done
                   if [ "$rel" = "." ]; then
                     t=R
-                  elif [ "$n_all" -gt 0 ] && [ "$n_all" = "$n_dirs" ]; then
-                    t=F
-                  else
+                  elif [ -f "$p/CLAUDE.md" ]; then
                     t=P
+                  else
+                    base="${p##*/}"
+                    if [ "${base%_suite}" != "$base" ]; then
+                      t=S
+                    else
+                      t=F
+                    fi
+                  fi
+                  n_all=0
+                  if [ "$t" = "F" ] || [ "$t" = "S" ] || [ "$t" = "R" ]; then
+                    for c in "$p"/* "$p"/.[!.]* "$p"/..?* ; do
+                      [ -e "$c" ] || continue
+                      n_all=$(( n_all + 1 ))
+                    done
                   fi
                   printf '%s\t%s\t%s\n' "$rel" "$t" "$n_all"
                 done
@@ -728,18 +1255,22 @@ refetch_tree() {
             [ \"\$i\" -gt 2000 ] && break
             rel=\"\${p#./}\"
             [ \"\$p\" = \".\" ] && rel=\".\"
-            n_all=0; n_dirs=0
-            for c in \"\$p\"/* \"\$p\"/.[!.]* \"\$p\"/..?* ; do
-              [ -e \"\$c\" ] || continue
-              n_all=\$(( n_all + 1 ))
-              [ -d \"\$c\" ] && n_dirs=\$(( n_dirs + 1 ))
-            done
             if [ \"\$rel\" = \".\" ]; then
               t=R
-            elif [ \"\$n_all\" -gt 0 ] && [ \"\$n_all\" = \"\$n_dirs\" ]; then
-              t=F
-            else
+            elif [ -f \"\$p/CLAUDE.md\" ]; then
               t=P
+            else
+              case \"\${p##*/}\" in
+                *_suite) t=S ;;
+                *)       t=F ;;
+              esac
+            fi
+            n_all=0
+            if [ \"\$t\" = \"F\" ] || [ \"\$t\" = \"S\" ] || [ \"\$t\" = \"R\" ]; then
+              for c in \"\$p\"/* \"\$p\"/.[!.]* \"\$p\"/..?* ; do
+                [ -e \"\$c\" ] || continue
+                n_all=\$(( n_all + 1 ))
+              done
             fi
             printf \"%s\\t%s\\t%s\\n\" \"\$rel\" \"\$t\" \"\$n_all\"
           done
@@ -767,7 +1298,7 @@ refetch_tree() {
     esac
     IFS=$'\t' read -r tp tt tc <<< "$row"
     [[ -z "${tp:-}" || -z "${tt:-}" ]] && continue
-    [[ ! "$tt" =~ ^[RFP]$ ]] && continue
+    [[ ! "$tt" =~ ^[RFSPHM]$ ]] && continue
     if [[ "$tp" != "." && ! "$tp" =~ ^([a-zA-Z0-9._-]+/)*[a-zA-Z0-9._-]+$ ]]; then
       continue
     fi
@@ -783,6 +1314,8 @@ refetch_tree() {
     TREE_CHILDREN+=("${tc:-0}")
     TREE_PARENT+=("$parent")
   done <<< "$body"
+  # Apply the same H/M synthesis + nested-Suite demotion as the initial parse.
+  post_classify_tree
 }
 
 # ---- picker_loop(path) ----
@@ -808,11 +1341,9 @@ picker_loop() {
       cancel)
         return 0 ;;
       folder)
+        # Drill into a Folder OR Suite (both have kind=folder in the picker
+        # rows). Recursive — the inner loop returns when the user backs out.
         picker_loop "$SELECTED_PAYLOAD"
-        [[ "${PICKER_RESULT:-}" == "attach" ]] && return 0
-        ;;
-      root_bucket)
-        picker_loop ".root"
         [[ "${PICKER_RESULT:-}" == "attach" ]] && return 0
         ;;
       project)
@@ -826,24 +1357,17 @@ picker_loop() {
         PICKER_PROJECT="${full##*/}"
         PICKER_RESULT=attach
         return 0 ;;
-      new_folder)
-        prompt_new_folder "$path"
-        # Stay at this level; the next loop iteration re-renders with the
-        # new folder visible (or unchanged on validation failure).
-        ;;
-      new_project)
-        prompt_new_project "$path"
+      new_anything)
+        prompt_new_anything "$path"
         if (( ${PROMPT_OK:-0} )); then
-          # `path == ".root"` means "root projects view" — the actual parent
-          # for a project created here is "" (true root), not ".root".
-          if [[ "$path" == ".root" ]]; then
-            PICKER_PARENT=""
-          else
-            PICKER_PARENT="$path"
+          if [[ "$PROMPT_KIND" == "attach" ]]; then
+            # Project / Hub / Member: attach to tmux on the new entry.
+            PICKER_PARENT="$PROMPT_PARENT"
+            PICKER_PROJECT="$PROMPT_NAME"
+            PICKER_RESULT=attach
+            return 0
           fi
-          PICKER_PROJECT="$PROMPT_NAME"
-          PICKER_RESULT=attach
-          return 0
+          # Folder / Suite: tree was refetched; loop re-renders this level.
         fi
         ;;
     esac

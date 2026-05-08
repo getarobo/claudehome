@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 # claudehome.ps1 — PowerShell 7+ port of bin/claudehome.
-# Strict parity with bash; see .omc/specs/deep-interview-claudehome-pc-v1.md
-# and .omc/specs/deep-interview-claudehome-folder-tree-v1.md.
+# Strict parity with bash; see .omc/specs/deep-interview-claudehome-5type-v1.md
+# and .omc/plans/claudehome-5type-v1-plan.md.
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandArgumentPassing = 'Standard'          # consistent arg-passing on pwsh 7.0–7.6
@@ -14,6 +14,15 @@ $OutputEncoding           = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 [Console]::InputEncoding  = [System.Text.UTF8Encoding]::new($false)
 
+# Write-WarnStderr — print prefixed warning to stderr.
+# Defined early so all helpers can use it. Always succeeds. Pwsh equivalent of
+# bash `warn()`; AC-5T-PC14 byte-identical-bytes principle keeps the wording in
+# lockstep with bash's warn helper.
+function Write-WarnStderr {
+    param([string]$Message)
+    [Console]::Error.WriteLine("claudehome: $Message")
+}
+
 # ---- help ----
 if ($args.Count -ge 1 -and $args[0] -in @('-h', '--help')) {
     @'
@@ -23,12 +32,12 @@ Usage: claudehome
   shows tmux session state for each, and attaches via SSH over Tailscale.
   Sessions are named claudehome-<project> and outlive any claude process.
 
-  Folders organize projects in a drill-down picker — pick [new folder here]
-  to create one. Project names are globally unique across the whole tree;
-  tmux sessions are named claudehome-<basename> regardless of folder depth.
-  The last picker row is [new project here] — pick it to create a fresh
-  project at the current drill level. Names are validated against the same
-  allowlist applied to env vars; duplicates are refused.
+  5-type structure: Folders organize, Suites group masterplan workspaces
+  (*_suite), Projects/Hubs/Members are attachable. The last picker row is
+  [new...] — pick a type and a name. Suite-with-Hub Members get hub-aware
+  scaffolding (git init + @-import + projects.md row). Project/Hub/Member
+  names are globally unique across the whole tree; tmux sessions are named
+  claudehome-<basename> regardless of depth.
 
 Environment variables (or set in ~/.claudehomerc):
   CLAUDEHOME_HOST          Tailscale hostname of the Mac mini   (required)
@@ -77,18 +86,23 @@ $rxPath      = '^[a-zA-Z0-9._~/-]+$'
 $rxProj      = '^[a-zA-Z0-9._-]+$'
 $rxTreePath  = '^([a-zA-Z0-9._-]+/)*[a-zA-Z0-9._-]+$'
 
-function Die([string]$msg) { [Console]::Error.WriteLine($msg); exit 1 }
+function Invoke-Die {
+    param([string]$Message)
+    [Console]::Error.WriteLine($Message)
+    exit 1
+}
 
 if (-not $HostName) {
-    Die "claudehome: CLAUDEHOME_HOST is not set.`n  Run .\install_client.ps1 to configure, or: `$env:CLAUDEHOME_HOST = '<tailscale-hostname>'"
+    Invoke-Die "claudehome: CLAUDEHOME_HOST is not set.`n  Run .\install_client.ps1 to configure, or: `$env:CLAUDEHOME_HOST = '<tailscale-hostname>'"
 }
-if ($HostName    -notmatch $rxHost) { Die "claudehome: CLAUDEHOME_HOST='$HostName' has unsupported characters.`n  Allowed: letters, digits, '.', '_', '-'" }
-if ($RemoteUser  -notmatch $rxUser) { Die "claudehome: CLAUDEHOME_USER='$RemoteUser' has unsupported characters.`n  Allowed: letters, digits, '.', '_', '-'" }
-if ($ProjectsDir -notmatch $rxPath) { Die "claudehome: CLAUDEHOME_PROJECTS_DIR='$ProjectsDir' has unsupported characters.`n  Allowed: letters, digits, '.', '_', '/', '~', '-'" }
+if ($HostName    -notmatch $rxHost) { Invoke-Die "claudehome: CLAUDEHOME_HOST='$HostName' has unsupported characters.`n  Allowed: letters, digits, '.', '_', '-'" }
+if ($RemoteUser  -notmatch $rxUser) { Invoke-Die "claudehome: CLAUDEHOME_USER='$RemoteUser' has unsupported characters.`n  Allowed: letters, digits, '.', '_', '-'" }
+if ($ProjectsDir -notmatch $rxPath) { Invoke-Die "claudehome: CLAUDEHOME_PROJECTS_DIR='$ProjectsDir' has unsupported characters.`n  Allowed: letters, digits, '.', '_', '/', '~', '-'" }
 
 # ---- remote tree-walk emitter (single-SSH fetch) ----
 # Wire format: ---TREE---<rows>---TMUX---<sessions>
-# Rows: <relpath>\t<type>\t<child_count>; type ∈ {R, F, P}.
+# Rows: <relpath>\t<type>\t<child_count>; type ∈ {R, F, S, P} on the wire
+# (server emits 4 codes; H/M synthesized client-side by Read-Tree).
 # This bash payload is byte-identical with bin/claudehome's remote SSH block.
 # It runs on the mini's bash inside `bash --norc --noprofile -c '...'`, so every
 # `$` that should reach the remote bash is escaped as `\$` and every double
@@ -107,18 +121,22 @@ LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c '
         [ "$i" -gt 2000 ] && break
         rel="${p#./}"
         [ "$p" = "." ] && rel="."
-        n_all=0; n_dirs=0
-        for c in "$p"/* "$p"/.[!.]* "$p"/..?* ; do
-          [ -e "$c" ] || continue
-          n_all=$(( n_all + 1 ))
-          [ -d "$c" ] && n_dirs=$(( n_dirs + 1 ))
-        done
         if [ "$rel" = "." ]; then
           t=R
-        elif [ "$n_all" -gt 0 ] && [ "$n_all" = "$n_dirs" ]; then
-          t=F
-        else
+        elif [ -f "$p/CLAUDE.md" ]; then
           t=P
+        else
+          case "${p##*/}" in
+            *_suite) t=S ;;
+            *)       t=F ;;
+          esac
+        fi
+        n_all=0
+        if [ "$t" = "F" ] || [ "$t" = "S" ] || [ "$t" = "R" ]; then
+          for c in "$p"/* "$p"/.[!.]* "$p"/..?* ; do
+            [ -e "$c" ] || continue
+            n_all=$(( n_all + 1 ))
+          done
         fi
         printf "%s\t%s\t%s\n" "$rel" "$t" "$n_all"
       done
@@ -133,7 +151,7 @@ function Invoke-RemoteFetch {
     $cmd = $remoteDataTpl.Replace('__PROJECTS_DIR__', $ProjectsDir)
     $out = & ssh.exe -o BatchMode=yes -o ConnectTimeout=5 "$RemoteUser@$HostName" $cmd 2>$null
     if ($LASTEXITCODE -ne 0) {
-        Die @"
+        Invoke-Die @"
 claudehome: cannot reach $RemoteUser@$HostName over SSH.
   - Check Tailscale is up on both devices:   tailscale status
   - Check Mac mini Remote Login is enabled:  System Settings > General > Sharing
@@ -146,14 +164,60 @@ claudehome: cannot reach $RemoteUser@$HostName over SSH.
 
 # ---- parse RAW into tree + tmux blocks ----
 # $script:treeRows is a List of [PSCustomObject]@{ Path; Type; Children; Parent }.
-# $script:tmuxBlock holds the raw "<name> <ts>" lines for activity lookups.
-# $script:skippedBadPaths counts wire-format-invariant violations for a single
-# deduped stderr warning per session.
+# Type field is mutable so the post-classification pass can promote P → H/M and
+# demote nested S → F. PowerShell's Sort-Object by property still works on
+# PSCustomObject after Set-Item-style mutation.
 $script:treeRows         = [System.Collections.Generic.List[object]]::new()
 $script:tmuxBlock        = ''
 $script:skippedBadPaths  = 0
 $script:truncatedRows    = $false
 $script:truncatedDepth   = $false
+
+# Invoke-PostClassifyTree — mirror of bash post_classify_tree.
+#   1. For each P-row, if any ancestor segment ends `_suite`, promote to M.
+#      If additionally the immediate parent ends `_suite` AND row basename ends
+#      `_hub`, promote to H instead. Spec §3.2.
+#   2. For each S-row whose ancestor chain contains `_suite`, demote to F and
+#      emit one stderr warning per offending path. AC-5T7.
+# Idempotent: safe to call after Read-Tree in both initial fetch and refresh.
+function Invoke-PostClassifyTree {
+    foreach ($r in $script:treeRows) {
+        if ($r.Type -ne 'P') { continue }
+        $segs = $r.Path -split '/'
+        $nSegs = $segs.Count
+        $hasSuiteAncestor = $false
+        $parentIsSuite = $false
+        # Walk segs[0..nSegs-2] (every ancestor — exclude the row itself).
+        for ($j = 0; $j -lt $nSegs - 1; $j++) {
+            if ($segs[$j] -match '_suite$') {
+                $hasSuiteAncestor = $true
+                if ($j -eq $nSegs - 2) { $parentIsSuite = $true }
+            }
+        }
+        if ($hasSuiteAncestor) {
+            $rowBasename = $segs[$nSegs - 1]
+            if ($parentIsSuite -and $rowBasename -match '_hub$') {
+                $r.Type = 'H'
+            } else {
+                $r.Type = 'M'
+            }
+        }
+    }
+
+    # Second pass: nested-Suite demotion.
+    foreach ($r in $script:treeRows) {
+        if ($r.Type -ne 'S') { continue }
+        $segs = $r.Path -split '/'
+        $nSegs = $segs.Count
+        for ($j = 0; $j -lt $nSegs - 1; $j++) {
+            if ($segs[$j] -match '_suite$') {
+                $r.Type = 'F'
+                Write-WarnStderr "nested Suites not supported; treating $($r.Path) as Folder"
+                break
+            }
+        }
+    }
+}
 
 function Read-Tree {
     param([string]$Raw)
@@ -191,13 +255,12 @@ function Read-Tree {
         $tc = if ($parts.Count -ge 3) { $parts[2] } else { '0' }
         if ([string]::IsNullOrEmpty($tp) -or [string]::IsNullOrEmpty($tt)) { continue }
 
-        # Wire-format invariant (P6): every path is `.` (synthetic root) or
-        # matches the allowlist regex. Drop bad rows silently and bump the
-        # counter for a single deduped stderr warning. The type-validity
-        # check catches TAB-in-name corruption that the path regex misses
-        # (corrupted row's first field can pass the allowlist while $tt
-        # holds garbage like "tab" or "F\t0"); see plan §R6 + bash parity.
-        if ($tt -notmatch '^[RFP]$') {
+        # Wire-format invariant: every path is `.` (synthetic root) or matches
+        # the allowlist regex. Drop bad rows silently and bump the counter for
+        # a single deduped stderr warning. Type-validity catches TAB-in-name
+        # corruption that the path regex misses. Server emits R/F/S/P; parser
+        # also accepts H/M so test fixtures can inject hand-crafted rows.
+        if ($tt -notmatch '^[RFSPHM]$') {
             $script:skippedBadPaths++
             continue
         }
@@ -221,6 +284,8 @@ function Read-Tree {
             Parent   = $parent
         })
     }
+
+    Invoke-PostClassifyTree
 
     if ($script:skippedBadPaths -gt 0) {
         [Console]::Error.WriteLine("claudehome: skipped $($script:skippedBadPaths) path with disallowed characters — rename on the mini to surface it")
@@ -264,68 +329,76 @@ function Get-SessionActivity {
 # ---- Get-RowList ----
 # Returns a list of [PSCustomObject]@{ Line; Kind; Payload } in spec-mandated
 # order. Mirrors bash build_rows_for_path():
-#   - [..  back] for non-root non-root_bucket frames
-#   - folders alphabetical
-#   - active projects descending by ts, then idle alphabetical
-#   - synthetic (root) bucket only at true top level when both folders AND
-#     root projects exist
-#   - [new folder here] then [new project here] always last
+#   - [..  back] for non-root frames
+#   - Folders + Suites alphabetical (interleaved by basename)
+#   - Projects + Hubs + Members active-then-idle alphabetical
+#   - [new...] always last
+# Kinds: back, folder (F or S, drillable), project (P/H/M, attachable),
+# new_anything. The (root) bucket from folder-tree-v1 is dropped — top-level
+# now shows Folders/Suites + Projects/Hubs/Members + [new...] flat.
 function Get-RowList {
     param([string]$Path)
 
     $out = [System.Collections.Generic.List[object]]::new()
 
-    if (-not [string]::IsNullOrEmpty($Path) -and $Path -ne '.root') {
+    if (-not [string]::IsNullOrEmpty($Path)) {
         $out.Add([PSCustomObject]@{ Line = '[..  back]'; Kind = 'back'; Payload = '' })
     }
 
-    $rootBucketMode = $false
-    if ($Path -eq '.root') {
-        $matchParent = ''
-        $rootBucketMode = $true
-    } else {
-        $matchParent = $Path
-    }
+    $matchParent = $Path
 
     $folderItems = [System.Collections.Generic.List[object]]::new()
     $activeItems = [System.Collections.Generic.List[object]]::new()
     $idleItems   = [System.Collections.Generic.List[object]]::new()
 
-    $rootHasFolders  = $false
-    $rootHasProjects = $false
-
     foreach ($r in $script:treeRows) {
         if ($r.Path -eq '.') { continue }
-        if ([string]::IsNullOrEmpty($Path)) {
-            if ($r.Parent -eq '' -and $r.Type -eq 'F') { $rootHasFolders  = $true }
-            if ($r.Parent -eq '' -and $r.Type -eq 'P') { $rootHasProjects = $true }
-        }
         if ($r.Parent -ne $matchParent) { continue }
-        if ($rootBucketMode -and $r.Type -ne 'P') { continue }
 
         $basename = if ($r.Path.Contains('/')) { $r.Path.Substring($r.Path.LastIndexOf('/') + 1) } else { $r.Path }
 
-        if ($r.Type -eq 'F') {
-            $folderItems.Add([PSCustomObject]@{
-                Line     = "$basename/  ($($r.Children))"
-                Basename = $basename
-                Path     = $r.Path
-            })
-        } else {
-            $act = Get-SessionActivity -Basename $basename
-            if ($null -ne $act) {
-                $activeItems.Add([PSCustomObject]@{
-                    Line     = "$basename  [active $($act.Label)]"
-                    Basename = $basename
-                    Ts       = [int64]$act.Ts
-                    Path     = $r.Path
-                })
-            } else {
-                $idleItems.Add([PSCustomObject]@{
-                    Line     = "$basename  [idle]"
+        switch ($r.Type) {
+            'F' {
+                $folderItems.Add([PSCustomObject]@{
+                    Line     = "$basename/  ($($r.Children))"
                     Basename = $basename
                     Path     = $r.Path
                 })
+            }
+            'S' {
+                # Suite renders as `<name>_suite/  (N)` — `_suite` is part of
+                # basename. Folders + Suites interleave alphabetically.
+                $folderItems.Add([PSCustomObject]@{
+                    Line     = "$basename/  ($($r.Children))"
+                    Basename = $basename
+                    Path     = $r.Path
+                })
+            }
+            { $_ -in 'P', 'H', 'M' } {
+                # Badge column: between basename and activity.
+                $badge = switch ($r.Type) {
+                    'H' { 'HUB' }
+                    'M' { 'member' }
+                    default { '' }
+                }
+                $act = Get-SessionActivity -Basename $basename
+                $actCol = if ($null -ne $act) { "[active $($act.Label)]" } else { '[idle]' }
+                $line = if ($badge) { "$basename  $badge  $actCol" } else { "$basename  $actCol" }
+
+                if ($null -ne $act) {
+                    $activeItems.Add([PSCustomObject]@{
+                        Line     = $line
+                        Basename = $basename
+                        Ts       = [int64]$act.Ts
+                        Path     = $r.Path
+                    })
+                } else {
+                    $idleItems.Add([PSCustomObject]@{
+                        Line     = $line
+                        Basename = $basename
+                        Path     = $r.Path
+                    })
+                }
             }
         }
     }
@@ -340,26 +413,7 @@ function Get-RowList {
         $out.Add([PSCustomObject]@{ Line = $i.Line; Kind = 'project'; Payload = $i.Path })
     }
 
-    # `(root)` bucket — only at true top level (Path == '') and only when both
-    # root folders AND root projects exist. When shown, strip the per-project
-    # root rows we already appended above (they duplicate the bucket contents).
-    if ([string]::IsNullOrEmpty($Path) -and $rootHasFolders -and $rootHasProjects) {
-        $rootN = 0
-        foreach ($r in $script:treeRows) {
-            if ($r.Type -eq 'P' -and $r.Parent -eq '') { $rootN++ }
-        }
-        # Strip top-level project rows we appended (Payload has no '/').
-        $kept = [System.Collections.Generic.List[object]]::new()
-        foreach ($row in $out) {
-            if ($row.Kind -eq 'project' -and -not $row.Payload.Contains('/')) { continue }
-            $kept.Add($row)
-        }
-        $out = $kept
-        $out.Add([PSCustomObject]@{ Line = "(root)  ($rootN)"; Kind = 'root_bucket'; Payload = '.root' })
-    }
-
-    $out.Add([PSCustomObject]@{ Line = '[new folder here]';  Kind = 'new_folder';  Payload = '' })
-    $out.Add([PSCustomObject]@{ Line = '[new project here]'; Kind = 'new_project'; Payload = '' })
+    $out.Add([PSCustomObject]@{ Line = '[new...]'; Kind = 'new_anything'; Payload = '' })
     return $out
 }
 
@@ -394,11 +448,10 @@ function Select-One {
 }
 
 # ---- Update-Tree ----
-# Re-runs the SSH fetch + parser. Used after folder creation so the new folder
-# is visible in the next picker render. Unlike Invoke-RemoteFetch (initial
-# fetch — dies on SSH failure), Update-Tree keeps the stale tree on failure and
-# warns to stderr. Mirrors bash refetch_tree's `|| return 0` behavior so the
-# picker survives a transient network blip after a successful initial fetch.
+# Re-runs the SSH fetch + parser. Used after creation so the new entry is
+# visible in the next picker render. Keeps the stale tree on failure and warns
+# (mirrors bash refetch_tree's `|| return 0` behavior so the picker survives a
+# transient network blip after a successful initial fetch).
 function Update-Tree {
     $cmd = $remoteDataTpl.Replace('__PROJECTS_DIR__', $ProjectsDir)
     $out = & ssh.exe -o BatchMode=yes -o ConnectTimeout=5 "$RemoteUser@$HostName" $cmd 2>$null
@@ -410,101 +463,441 @@ function Update-Tree {
     Read-Tree -Raw ([string]$out)
 }
 
-# ---- New-Folder ----
-# Prompts for a basename, validates against the allowlist + sibling collision,
-# creates the folder via SSH `mkdir -p`, refetches the tree. Returns $true on
-# success, $false on user cancel / empty input.
-function New-Folder {
-    param([string]$ParentPath)
+# ---- name validation + collision helpers (creation flow) ----
 
-    while ($true) {
-        $name = Read-Host 'New folder name'
-        if ([string]::IsNullOrEmpty($name)) { return $false }
-        if ($name -notmatch $rxProj) {
-            [Console]::Error.WriteLine("  '$name' has unsupported characters. Allowed: letters, digits, '.', '_', '-'. Try again.")
-            continue
-        }
-        if ($name -eq '.' -or $name -eq '..' -or $name.StartsWith('.')) {
-            [Console]::Error.WriteLine("  '$name' is reserved. Pick a different name.")
-            continue
-        }
-        # Sibling collision: any row at the same parent (folder OR project).
-        $collide = $false
-        foreach ($r in $script:treeRows) {
-            if ($r.Parent -ne $ParentPath) { continue }
-            $exb = if ($r.Path.Contains('/')) { $r.Path.Substring($r.Path.LastIndexOf('/') + 1) } else { $r.Path }
-            if ($exb -eq $name) { $collide = $true; break }
-        }
-        if ($collide) {
-            $where = if ([string]::IsNullOrEmpty($ParentPath)) { $name } else { "$ParentPath/$name" }
-            [Console]::Error.WriteLine("  '$name' already exists at $where. Pick a different name.")
-            continue
-        }
-        # Create on disk via SSH.
-        $rel = if ([string]::IsNullOrEmpty($ParentPath)) { $name } else { "$ParentPath/$name" }
-        $mkTpl = @'
-LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c 'mkdir -p __PROJECTS_DIR__/__REL__'
+# Test-NameAllowlist <name> — returns $true on accept, prints stderr + returns
+# $false on reject. Mirrors bash _validate_name. Empty string returns $false.
+function Test-NameAllowlist {
+    param([string]$Name)
+    if ([string]::IsNullOrEmpty($Name)) { return $false }
+    if ($Name -notmatch $rxProj) {
+        [Console]::Error.WriteLine("  '$Name' has unsupported characters. Allowed: letters, digits, '.', '_', '-'. Try again.")
+        return $false
+    }
+    if ($Name -eq '.' -or $Name -eq '..' -or $Name.StartsWith('.')) {
+        [Console]::Error.WriteLine("  '$Name' is reserved. Pick a different name.")
+        return $false
+    }
+    return $true
+}
+
+# Test-SiblingCollision <parent> <name> — returns $true if any row at $parent
+# already has basename $name (any type). Mirrors bash _check_sibling_collision.
+function Test-SiblingCollision {
+    param([string]$ParentPath, [string]$Name)
+    foreach ($r in $script:treeRows) {
+        if ($r.Parent -ne $ParentPath) { continue }
+        $exb = if ($r.Path.Contains('/')) { $r.Path.Substring($r.Path.LastIndexOf('/') + 1) } else { $r.Path }
+        if ($exb -eq $Name) { return $true }
+    }
+    return $false
+}
+
+# Get-GlobalConflict <name> — returns the conflicting full path string if any
+# P/H/M row anywhere shares the basename, $null otherwise. Mirrors bash
+# _check_global_unique. Folder/Suite skip this check.
+function Get-GlobalConflict {
+    param([string]$Name)
+    foreach ($r in $script:treeRows) {
+        if ($r.Type -notin @('P', 'H', 'M')) { continue }
+        $exb = if ($r.Path.Contains('/')) { $r.Path.Substring($r.Path.LastIndexOf('/') + 1) } else { $r.Path }
+        if ($exb -eq $Name) { return $r.Path }
+    }
+    return $null
+}
+
+# Invoke-WalkToSuiteRoot <drillPath> — walk segments of $drillPath looking for
+# the closest-to-root segment ending `_suite`. Returns its accumulated path, or
+# '' if none. Mirrors bash walk_to_suite_root.
+function Invoke-WalkToSuiteRoot {
+    param([string]$Path)
+    if ([string]::IsNullOrEmpty($Path)) { return '' }
+    $segs = $Path -split '/'
+    $acc = ''
+    foreach ($seg in $segs) {
+        $acc = if ($acc) { "$acc/$seg" } else { $seg }
+        if ($seg -match '_suite$') { return $acc }
+    }
+    return ''
+}
+
+# Get-HubInfo <suiteRel> — single SSH probe at the Suite root counting `*_hub`
+# direct children that have CLAUDE.md. Returns @{ Count = <int>; Path = <abs|empty> }.
+# Mirrors bash detect_hub. On Multi-Hub, Path is empty (caller warns + skips).
+function Get-HubInfo {
+    param([string]$SuiteRel)
+    $info = [PSCustomObject]@{ Count = 0; Path = '' }
+    if ([string]::IsNullOrEmpty($SuiteRel)) { return $info }
+    $tpl = @'
+LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c '
+  cd __PROJECTS_DIR__ 2>/dev/null || exit 0
+  suite="__SUITE_REL__"
+  n=0; first=
+  for h in "$suite"/*_hub; do
+    [ -d "$h" ] && [ -f "$h/CLAUDE.md" ] || continue
+    n=$((n+1))
+    [ -z "$first" ] && first=$(cd "$h" 2>/dev/null && pwd -P)
+  done
+  printf "%s\t%s\n" "$n" "$first"
+'
 '@
-        $mkCmd = $mkTpl.Replace('__PROJECTS_DIR__', $ProjectsDir).Replace('__REL__', $rel)
-        & ssh.exe -o BatchMode=yes -o ConnectTimeout=5 "$RemoteUser@$HostName" $mkCmd 2>$null | Out-Null
-        Update-Tree
-        return $true
+    $cmd = $tpl.Replace('__PROJECTS_DIR__', $ProjectsDir).Replace('__SUITE_REL__', $SuiteRel)
+    $out = & ssh.exe -o BatchMode=yes -o ConnectTimeout=5 "$RemoteUser@$HostName" $cmd 2>$null
+    if ($LASTEXITCODE -ne 0 -or $null -eq $out) { return $info }
+    if ($out -is [array]) { $out = $out -join "`n" }
+    $line = ([string]$out).Trim()
+    if ([string]::IsNullOrEmpty($line)) { return $info }
+    $parts = $line -split "`t", 2
+    if ($parts.Count -lt 1) { return $info }
+    $cnt = 0
+    [int]::TryParse($parts[0], [ref]$cnt) | Out-Null
+    $info.Count = $cnt
+    if ($cnt -eq 1 -and $parts.Count -ge 2) {
+        $info.Path = $parts[1]
+    }
+    return $info
+}
+
+# Read-Description — single-line description prompt for Member creation. Empty
+# input yields the placeholder string. Embedded newlines are rejected with a
+# re-prompt. Mirrors bash prompt_description.
+function Read-Description {
+    while ($true) {
+        $desc = Read-Host 'One-line description (optional)'
+        if ($null -eq $desc) {
+            return '<one-line description goes here>'
+        }
+        if ($desc.Contains("`n") -or $desc.Contains("`r")) {
+            Write-WarnStderr 'description must be single-line'
+            continue
+        }
+        if ([string]::IsNullOrEmpty($desc)) {
+            return '<one-line description goes here>'
+        }
+        return $desc
     }
 }
 
-# ---- New-Project ----
-# Prompts for a basename. Sibling collision (same parent, any type) AND
-# globally-unique scan (any P-type row with same basename) — error wording is
-# byte-identical with bash AC-FT4. Returns the basename on success, $null on
-# cancel / empty input. The mkdir for the project itself happens at attach
-# time (idempotent — same as bash).
-function New-Project {
+# ---- creation actions (per-type) ----
+#
+# Each action returns @{ Ok = $true|$false; Kind = 'folder'|'attach'; Name = <basename> }
+# on success, or $null on failure. `Kind = 'folder'` means re-render the picker
+# at the same drill level (Folder/Suite created); `Kind = 'attach'` means break
+# out of the picker and tmux-attach (Project/Hub/Member created).
+
+# Invoke-CreateFolder <parent> <name> — empty mkdir + tree refresh.
+function Invoke-CreateFolder {
+    param([string]$ParentPath, [string]$Name)
+    $rel = if ([string]::IsNullOrEmpty($ParentPath)) { $Name } else { "$ParentPath/$Name" }
+    Invoke-RemoteMkdir -Rel $rel
+    Update-Tree
+    return @{ Ok = $true; Kind = 'folder'; Name = $Name }
+}
+
+# Invoke-CreateSuite <parent> <prefix> — auto-suffix `_suite`, mkdir, refresh.
+function Invoke-CreateSuite {
+    param([string]$ParentPath, [string]$Prefix)
+    $final = "${Prefix}_suite"
+    $rel = if ([string]::IsNullOrEmpty($ParentPath)) { $final } else { "$ParentPath/$final" }
+    Invoke-RemoteMkdir -Rel $rel
+    Update-Tree
+    return @{ Ok = $true; Kind = 'folder'; Name = $final }
+}
+
+# Invoke-CreateProject <parent> <name> — mkdir + 1-line CLAUDE.md, then attach.
+function Invoke-CreateProject {
+    param([string]$ParentPath, [string]$Name)
+    $rel = if ([string]::IsNullOrEmpty($ParentPath)) { $Name } else { "$ParentPath/$Name" }
+    Invoke-RemoteMkdir -Rel $rel
+    Invoke-WriteMinimalClaudeMd -Rel $rel -Name $Name
+    return @{ Ok = $true; Kind = 'attach'; Name = $Name }
+}
+
+# Invoke-CreateHub <parent> <prefix> — auto-suffix `_hub`, mkdir, write
+# CLAUDE.md + README.md + projects.md template, then attach. The Hub is then
+# attachable like any P/H/M.
+function Invoke-CreateHub {
+    param([string]$ParentPath, [string]$Prefix)
+    $final = "${Prefix}_hub"
+    $rel = if ([string]::IsNullOrEmpty($ParentPath)) { $final } else { "$ParentPath/$final" }
+    Invoke-RemoteMkdir -Rel $rel
+    Invoke-WriteHubScaffold -Rel $rel -HubName $final
+    return @{ Ok = $true; Kind = 'attach'; Name = $final }
+}
+
+# Invoke-CreateMember <parent> <name> <suiteRoot> — full hub-aware Member
+# creation. mkdir, then optionally git init + @-import CLAUDE.md + projects.md
+# row when exactly one Hub exists at the Suite root. On Multi-Hub or no-Hub,
+# falls back to a plain `# <name>\n` CLAUDE.md.
+function Invoke-CreateMember {
+    param([string]$ParentPath, [string]$Name, [string]$SuiteRoot)
+    $rel = if ([string]::IsNullOrEmpty($ParentPath)) { $Name } else { "$ParentPath/$Name" }
+    Invoke-RemoteMkdir -Rel $rel
+
+    $hub = Get-HubInfo -SuiteRel $SuiteRoot
+    if ($hub.Count -eq 0) {
+        Invoke-WriteMinimalClaudeMd -Rel $rel -Name $Name
+    } elseif ($hub.Count -ge 2) {
+        $suiteAbs = "$ProjectsDir/$SuiteRoot"
+        Write-WarnStderr "multiple *_hub siblings found in ${suiteAbs}; skipping hub-aware writes"
+        Invoke-WriteMinimalClaudeMd -Rel $rel -Name $Name
+    } else {
+        $desc = Read-Description
+        Invoke-HubAwareWrites -Rel $rel -Name $Name -HubAbs $hub.Path -Description $desc
+    }
+
+    return @{ Ok = $true; Kind = 'attach'; Name = $Name }
+}
+
+# ---- remote-write helpers (single SSH per call; warn-and-continue on failure) ----
+
+# Invoke-RemoteMkdir <rel> — idempotent mkdir under projects root.
+function Invoke-RemoteMkdir {
+    param([string]$Rel)
+    $tpl = @'
+LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c 'mkdir -p __PROJECTS_DIR__/__REL__'
+'@
+    $cmd = $tpl.Replace('__PROJECTS_DIR__', $ProjectsDir).Replace('__REL__', $Rel)
+    & ssh.exe -o BatchMode=yes -o ConnectTimeout=5 "$RemoteUser@$HostName" $cmd 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-WarnStderr "mkdir failed for $Rel; continuing" }
+}
+
+# Invoke-WriteMinimalClaudeMd <rel> <name> — write `# <name>\n` to
+# <projects_root>/<rel>/CLAUDE.md (skip if file exists). Idempotent.
+function Invoke-WriteMinimalClaudeMd {
+    param([string]$Rel, [string]$Name)
+    $tpl = @'
+LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c '
+  f=__PROJECTS_DIR__/__REL__/CLAUDE.md
+  [ -f "$f" ] || printf "# %s\n" "__NAME__" > "$f"
+'
+'@
+    $cmd = $tpl.Replace('__PROJECTS_DIR__', $ProjectsDir).Replace('__REL__', $Rel).Replace('__NAME__', $Name)
+    & ssh.exe -o BatchMode=yes -o ConnectTimeout=5 "$RemoteUser@$HostName" $cmd 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-WarnStderr "write failed for $Rel/CLAUDE.md" }
+}
+
+# Invoke-WriteHubScaffold <rel> <hubName> — write Hub CLAUDE.md, README.md,
+# projects.md header. Idempotent on per-file basis.
+function Invoke-WriteHubScaffold {
+    param([string]$Rel, [string]$HubName)
+    $tpl = @'
+LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c '
+  d=__PROJECTS_DIR__/__REL__
+  [ -f "$d/CLAUDE.md" ]   || printf "# %s\n" "__HUB_NAME__" > "$d/CLAUDE.md"
+  [ -f "$d/README.md" ]   || printf "# %s\n\nHub README.\n" "__HUB_NAME__" > "$d/README.md"
+  if [ ! -f "$d/projects.md" ]; then
+    {
+      printf "| Name | Description | Status | Owner | Notes |\n"
+      printf "|------|-------------|--------|-------|-------|\n"
+    } > "$d/projects.md"
+  fi
+'
+'@
+    $cmd = $tpl.Replace('__PROJECTS_DIR__', $ProjectsDir).Replace('__REL__', $Rel).Replace('__HUB_NAME__', $HubName)
+    & ssh.exe -o BatchMode=yes -o ConnectTimeout=5 "$RemoteUser@$HostName" $cmd 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-WarnStderr "hub scaffold write failed for $Rel" }
+}
+
+# Invoke-HubAwareWrites <rel> <name> <hubAbs> <description> — the four
+# hub-aware writes for a Member. All warn-and-continue; never abort.
+#   1. git init in the member directory
+#   2. write CLAUDE.md with @-import to the Hub README
+#   3. append a row to <hub>/projects.md (only if it exists and is non-empty)
+# Pipe in description is escaped only in the projects.md row; left literal in
+# CLAUDE.md body. Description is delivered via quoted bash heredoc inside the
+# SSH payload to prevent expansion.
+function Invoke-HubAwareWrites {
+    param([string]$Rel, [string]$Name, [string]$HubAbs, [string]$Description)
+    $descPipeEscaped = $Description -replace '\|', '\|'
+    # Escape single quotes for safe inclusion inside the outer `bash -c '...'`
+    # quoted block. Without this, a `'` in $Description closes the outer quote
+    # and allows arbitrary command execution on the mini under $RemoteUser
+    # (verified RCE; security review iter-1 finding). The bash idiom is to
+    # close-quote, escape-quote, reopen-quote: `'` -> `'\''`.
+    # The heredoc EOF marker is also quoted (`<<'CLAUDEMD_EOF'`) so remote
+    # bash does not perform $() / backtick expansion inside CLAUDE.md body.
+    $descSq        = $Description -replace "'", "'\''"
+    $descPipeSq    = $descPipeEscaped -replace "'", "'\''"
+    $tpl = @'
+LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash --norc --noprofile -c '
+  member=__PROJECTS_DIR__/__REL__
+  hub="__HUB_ABS__"
+  ( cd "$member" 2>/dev/null && git init >/dev/null 2>&1 ) || true
+  cat > "$member/CLAUDE.md" <<'\''CLAUDEMD_EOF'\''
+# __NAME__
+
+@__HUB_ABS__/README.md
+
+__DESCRIPTION__
+CLAUDEMD_EOF
+  if [ -s "$hub/projects.md" ]; then
+    printf "| %s | %s | active | — | — |\n" "__NAME__" "__DESCRIPTION_ESCAPED__" >> "$hub/projects.md"
+  fi
+'
+'@
+    $cmd = $tpl.
+        Replace('__PROJECTS_DIR__', $ProjectsDir).
+        Replace('__REL__', $Rel).
+        Replace('__HUB_ABS__', $HubAbs).
+        Replace('__NAME__', $Name).
+        Replace('__DESCRIPTION_ESCAPED__', $descPipeSq).
+        Replace('__DESCRIPTION__', $descSq)
+    & ssh.exe -o BatchMode=yes -o ConnectTimeout=5 "$RemoteUser@$HostName" $cmd 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-WarnStderr "hub-aware writes failed for $Rel" }
+}
+
+# ---- Read-TypeChoice ----
+# Reads a creation-type choice from stdin. Accepts substring prefix matches
+# (e.g., `f` → `folder`); ambiguous prefix re-prompts. Empty input/Ctrl-D
+# returns ''. Mirrors bash _read_type_choice.
+function Read-TypeChoice {
+    param([string[]]$ValidTypes)
+    $valid = $ValidTypes -join ' '
+    while ($true) {
+        $answer = Read-Host "Create what? [$valid]"
+        if ($null -eq $answer -or [string]::IsNullOrEmpty($answer)) { return '' }
+        # Exact match wins.
+        $matched = $null
+        foreach ($v in $ValidTypes) {
+            if ($v -eq $answer) { $matched = $v; break }
+        }
+        if (-not $matched) {
+            $prefixHits = @($ValidTypes | Where-Object { $_.StartsWith($answer) })
+            if ($prefixHits.Count -eq 1) {
+                $matched = $prefixHits[0]
+            } elseif ($prefixHits.Count -gt 1) {
+                $matched = 'AMBIGUOUS'
+            }
+        }
+        if (-not $matched -or $matched -eq 'AMBIGUOUS') {
+            Write-WarnStderr "invalid type '$answer'; expected one of: $valid"
+            continue
+        }
+        return $matched
+    }
+}
+
+# ---- Invoke-NewAnything ----
+# Single dispatch point for the [new...] picker row. See spec §3.3.
+# Returns @{ Ok=$true; Kind='folder'|'attach'; Name=<basename>; Parent=<parent path> }
+# on success, or $null on cancel.
+function Invoke-NewAnything {
     param([string]$ParentPath)
 
+    # 1. Determine parent type.
+    $parentType = if ([string]::IsNullOrEmpty($ParentPath)) {
+        'R'
+    } else {
+        $row = $script:treeRows | Where-Object { $_.Path -eq $ParentPath } | Select-Object -First 1
+        if ($row) { $row.Type } else { '' }
+    }
+    if ($parentType -notin @('R', 'F', 'S')) {
+        Write-WarnStderr '[new...] not available at this drill level'
+        return $null
+    }
+
+    # 2. Compute valid creation types from parent type.
+    # F is structurally ambiguous (plain Folder vs. sub-Folder inside a Suite);
+    # walk_to_suite_root disambiguates. S is always at a Suite root; check for
+    # existing Hub via Get-HubInfo.
+    $suiteRoot = ''
+    $validTypes = @()
+    switch ($parentType) {
+        'R' { $validTypes = @('folder', 'suite', 'project') }
+        'F' {
+            $suiteRoot = Invoke-WalkToSuiteRoot -Path $ParentPath
+            if ($suiteRoot) {
+                $validTypes = @('folder', 'member')
+            } else {
+                $validTypes = @('folder', 'project')
+            }
+        }
+        'S' {
+            $suiteRoot = $ParentPath
+            $hub = Get-HubInfo -SuiteRel $suiteRoot
+            if ($hub.Count -eq 0) {
+                $validTypes = @('folder', 'member', 'hub')
+            } else {
+                $validTypes = @('folder', 'member')
+            }
+        }
+    }
+
+    # 3. Prompt for type.
+    $type = Read-TypeChoice -ValidTypes $validTypes
+    if ([string]::IsNullOrEmpty($type)) { return $null }
+
+    # 4. Prompt for name (loop on validation errors).
     while ($true) {
-        $name = Read-Host 'New project name'
+        $promptText = switch ($type) {
+            'folder'  { 'New folder name' }
+            'project' { 'New project name' }
+            'suite'   { 'New suite name (suffix _suite is auto-appended)' }
+            'hub'     { 'New hub name (suffix _hub is auto-appended)' }
+            'member'  { 'New member name' }
+        }
+        $name = Read-Host $promptText
         if ([string]::IsNullOrEmpty($name)) { return $null }
-        if ($name -notmatch $rxProj) {
-            [Console]::Error.WriteLine("  '$name' has unsupported characters. Allowed: letters, digits, '.', '_', '-'. Try again.")
+
+        # Suite/Hub: reject any user-typed `_suite`/`_hub` substring (suffix
+        # OR interior) before auto-appending. Pwsh `-match '_suite'` matches
+        # the substring anywhere — equivalent to bash glob `*_suite|*_suite_*`.
+        if ($type -eq 'suite' -and $name -match '_suite') {
+            Write-WarnStderr "name '_suite' substring not allowed; type just the prefix and the suffix is auto-appended."
             continue
         }
-        if ($name -eq '.' -or $name -eq '..' -or $name.StartsWith('.')) {
-            [Console]::Error.WriteLine("  '$name' is reserved. Pick a different name.")
+        if ($type -eq 'hub' -and $name -match '_hub') {
+            Write-WarnStderr "name '_hub' substring not allowed; type just the prefix and the suffix is auto-appended."
             continue
         }
-        # Sibling collision (same parent, any type).
-        $collide = $false
-        foreach ($r in $script:treeRows) {
-            if ($r.Parent -ne $ParentPath) { continue }
-            $exb = if ($r.Path.Contains('/')) { $r.Path.Substring($r.Path.LastIndexOf('/') + 1) } else { $r.Path }
-            if ($exb -eq $name) { $collide = $true; break }
-        }
-        if ($collide) {
-            $where = if ([string]::IsNullOrEmpty($ParentPath)) { $name } else { "$ParentPath/$name" }
-            [Console]::Error.WriteLine("  '$name' already exists at $where. Pick a different name.")
+
+        if (-not (Test-NameAllowlist -Name $name)) {
             continue
         }
-        # Globally-unique scan: any P-type row anywhere in the tree with the
-        # same basename. Cite the conflicting full path (AC-FT-PC4).
-        $conflict = $null
-        foreach ($r in $script:treeRows) {
-            if ($r.Type -ne 'P') { continue }
-            $exb = if ($r.Path.Contains('/')) { $r.Path.Substring($r.Path.LastIndexOf('/') + 1) } else { $r.Path }
-            if ($exb -eq $name) { $conflict = $r.Path; break }
+
+        # final_name = what actually lands on disk after auto-suffix.
+        $finalName = switch ($type) {
+            'suite' { "${name}_suite" }
+            'hub'   { "${name}_hub" }
+            default { $name }
         }
-        if ($null -ne $conflict) {
-            [Console]::Error.WriteLine("  '$name' already exists at $conflict. Pick a different name.")
+
+        # Sibling collision check (any type at same parent).
+        if (Test-SiblingCollision -ParentPath $ParentPath -Name $finalName) {
+            $where = if ([string]::IsNullOrEmpty($ParentPath)) { $finalName } else { "$ParentPath/$finalName" }
+            [Console]::Error.WriteLine("  '$finalName' already exists at $where. Pick a different name.")
             continue
         }
-        return $name
+
+        # Globally-unique scan for project/hub/member basenames.
+        if ($type -in @('project', 'hub', 'member')) {
+            $conflict = Get-GlobalConflict -Name $finalName
+            if ($null -ne $conflict) {
+                [Console]::Error.WriteLine("  '$finalName' already exists at $conflict. Pick a different name.")
+                continue
+            }
+        }
+
+        # 5. Dispatch to type-specific creator.
+        $result = switch ($type) {
+            'folder'  { Invoke-CreateFolder  -ParentPath $ParentPath -Name $finalName }
+            'suite'   { Invoke-CreateSuite   -ParentPath $ParentPath -Prefix $name }
+            'project' { Invoke-CreateProject -ParentPath $ParentPath -Name $finalName }
+            'hub'     { Invoke-CreateHub     -ParentPath $ParentPath -Prefix $name }
+            'member'  { Invoke-CreateMember  -ParentPath $ParentPath -Name $finalName -SuiteRoot $suiteRoot }
+        }
+        if ($null -ne $result -and $result.Ok) {
+            $result.Parent = $ParentPath
+            return $result
+        }
+        return $null
     }
 }
 
 # ---- Invoke-PickerLoop ----
 # Recursive drill loop. Returns @{ Action='attach'; Project=<basename>;
 # Parent=<parent path or ''> } on a project pick, or $null on cancel/back/exit.
-# Unlike bash, PowerShell has no `set -e` constraint, so we use return values
-# instead of globals.
 function Invoke-PickerLoop {
     param([string]$Path)
     while ($true) {
@@ -519,29 +912,20 @@ function Invoke-PickerLoop {
                 $r = Invoke-PickerLoop -Path $row.Payload
                 if ($null -ne $r) { return $r }
             }
-            'root_bucket'  {
-                $r = Invoke-PickerLoop -Path '.root'
-                if ($null -ne $r) { return $r }
-            }
             'project'      {
                 $parent =
-                    if ($Path -eq '.root') { '' }
-                    elseif ($row.Payload.Contains('/')) { $row.Payload.Substring(0, $row.Payload.LastIndexOf('/')) }
-                    else                                { '' }
+                    if ($row.Payload.Contains('/')) { $row.Payload.Substring(0, $row.Payload.LastIndexOf('/')) }
+                    else                            { '' }
                 $basename = if ($row.Payload.Contains('/')) { $row.Payload.Substring($row.Payload.LastIndexOf('/') + 1) } else { $row.Payload }
                 return @{ Action = 'attach'; Project = $basename; Parent = $parent }
             }
-            'new_project'  {
-                $parentForCreate = if ($Path -eq '.root') { '' } else { $Path }
-                $name = New-Project -ParentPath $parentForCreate
-                if ($null -ne $name) {
-                    return @{ Action = 'attach'; Project = $name; Parent = $parentForCreate }
-                }
-            }
-            'new_folder'   {
-                $parentForCreate = if ($Path -eq '.root') { '' } else { $Path }
-                if (New-Folder -ParentPath $parentForCreate) {
-                    # Tree is refetched; loop re-renders with new folder visible.
+            'new_anything' {
+                $r = Invoke-NewAnything -ParentPath $Path
+                if ($null -ne $r -and $r.Ok) {
+                    if ($r.Kind -eq 'attach') {
+                        return @{ Action = 'attach'; Project = $r.Name; Parent = $r.Parent }
+                    }
+                    # Folder/Suite: tree was refetched; loop re-renders this level.
                 }
             }
         }
@@ -557,15 +941,15 @@ $attachPath = $result.Parent
 
 # Defense-in-depth: revalidate basename and parent path at the SSH boundary.
 if ($project -notmatch $rxProj) {
-    Die "claudehome: project directory '$project' has characters that cannot be safely passed to SSH.`n  Rename it on $HostName to use only letters, digits, '.', '_', '-'."
+    Invoke-Die "claudehome: project directory '$project' has characters that cannot be safely passed to SSH.`n  Rename it on $HostName to use only letters, digits, '.', '_', '-'."
 }
 if (-not [string]::IsNullOrEmpty($attachPath) -and $attachPath -notmatch $rxTreePath) {
-    Die "claudehome: parent path '$attachPath' has characters that cannot be safely passed to SSH."
+    Invoke-Die "claudehome: parent path '$attachPath' has characters that cannot be safely passed to SSH."
 }
 
 # ---- attach (or create) tmux session ----
 # Session name is `claudehome-<basename>` regardless of folder depth — the
-# folder is invisible at the tmux layer (AC-FT-PC3).
+# folder is invisible at the tmux layer (AC-FT-PC3, spec line 134-136).
 # `-A` (no `-D`): attach if exists, create otherwise. Multiple clients may stay
 # attached to the same session simultaneously — tmux reflows to the most-
 # recently-active client.
