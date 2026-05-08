@@ -5,6 +5,23 @@ All notable changes to `claudehome` are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses 4-part versioning: `MAJOR.MINOR.BUILD.REVISION`.
 
+## [1.1.0.0] - 2026-05-08
+
+### Added
+- **tmux-server LaunchAgent on the mini** for macOS Keychain access in claudehome panes. `install_server.sh` writes `~/Library/LaunchAgents/com.${USER}.tmux-server.plist`; the agent runs `tmux new-session -d -s bootstrap` at next GUI login so the persistent tmux server lives in the Aqua securityd session. Panes spawned by that server inherit Aqua securityd, so Python `keyring`, `security` CLI, `git credential-osxkeychain`, and iCloud frameworks all work — previously they failed with `errSecInteractionNotAllowed`. Plist validated with `plutil -lint`; the installer does **not** `launchctl load` (would bind to the wrong launchd domain when run from SSH). Activation happens at next GUI login/reboot; any pre-existing SSH-sessioned tmux server must be killed first (`tmux kill-server` or reboot) for the new server to take over the default socket.
+
+### Fixed
+- **Korean / UTF-8 rendering inside tmux + claude over SSH.** `bash --norc --noprofile -c '...'` skipped the user profile that sets `LANG`, and OpenSSH does not forward `LANG`/`LC_ALL` by default — remote tmux sessions inherited `C`/`POSIX` locale, mangling Korean (and any non-ASCII / CJK / emoji). Both `bin/claudehome` and `bin/claudehome.ps1` now prefix the remote bash invocation with `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8`, in both the picker-fetch and attach paths. On Windows, `$OutputEncoding` and `[Console]::{Output,Input}Encoding` are also set to UTF-8 so pwsh does not garble bytes flowing to/from `ssh.exe` before WezTerm draws. Local-mode path is intentionally untouched (inherits the calling shell's locale and was reported working).
+
+### Documentation
+- **Spec amendment** (`Amendment 2026-05-08`) adds **AC-LOCAL4** covering the LaunchAgent and explicitly justifies it as a deliberate, narrowly-scoped exception to the v1 "no daemons / no server-side bootstrap" non-goals. The agent does no work beyond `tmux new-session -d`.
+- **CLAUDE.md** carves out the LaunchAgent exception against the "Daemons, background workers, persistent state files" and "Server-side bootstrap" non-goals; the install_server.sh description is extended to mention the plist.
+- **README.md** §1 step 8 explains the LaunchAgent and activation steps; the non-goal list is updated with the carve-out.
+- `.omc/keychain-tmux-handoff.md` (the original Option 1 / 2 / 3 diagnosis from 2026-05-08) gains a status header noting Option 2 is now automated by `install_server.sh`. Body retained as future-reference context if Keychain ever breaks again for an unrelated reason.
+
+### Operations
+- Backfilled annotated tags `v1.0.3.0` and `v1.0.3.1` against their original bump commits — both versions had been committed but never tagged.
+
 ## [1.0.3.1] - 2026-05-06
 
 ### Documentation
